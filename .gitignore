@@ -1,28 +1,45 @@
-# Build trees (CMake/Ninja) and packaged output
-/build/
-/build-*/
-/out/
+# Allowlist: only what is needed to build, test, package and understand the reconstruction is tracked.
+# Everything else (analysis working dirs, runtime captures, build trees, logs) stays local. To track a new file outside
+# these paths, add a "!" rule for it here.
+/*
+!/.gitignore
+!/README.md
+!/CMakeLists.txt
+!/build.sh
+!/build.ps1
+!/cmake/
+!/src/
+!/tests/
+!/docs/
 
-# Test package: keep the docs and the ME3 profile, not the built DLL, map or run logs
-/dist/nrsc.map
-/dist/SeamlessCoop/nrsc.dll
-/dist/SeamlessCoop/*.log
+# Vendored MinHook 1.3.4: the sources the build compiles, plus its license and readme
+!/third_party/
+/third_party/minhook/*
+!/third_party/minhook/include/
+!/third_party/minhook/src/
+!/third_party/minhook/LICENSE.txt
+!/third_party/minhook/AUTHORS.txt
+!/third_party/minhook/README.md
 
-# Large or machine-specific evidence (runtime captures are ~16 GB; Steam config backups hold personal data)
-/evidence/runtime/
-/evidence/steam-config-backup-*/
+# Generator for src/nrsc/signatures/signature_table.inc and its input (used by build.sh and the tests)
+!/tools/
+/tools/*
+!/tools/gen_signature_table.py
+!/evidence/
+/evidence/*
+!/evidence/signatures/
+/evidence/signatures/*
+!/evidence/signatures/signatures.json
 
-# Devirtualization / phase-3 working output and the local Python venv
-/devirt/.venv/
-/devirt/out/
-/phase3/out/
+# Package template copied by build.sh, and the in-game test instructions
+!/dist/
+/dist/*
+!/dist/TESTING.md
+!/dist/SeamlessCoop/
+/dist/SeamlessCoop/*
+!/dist/SeamlessCoop/nrsc_settings.ini
+!/dist/SeamlessCoop/nrsc_disable_hooks.txt
+!/dist/SeamlessCoop/locale/
 
-# Python, editor and OS clutter
 __pycache__/
 *.pyc
-.vscode/
-.idea/
-*.swp
-.DS_Store
-compile_commands.json
-.cache/
