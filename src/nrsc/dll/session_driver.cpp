@@ -22,6 +22,7 @@ namespace ps = platform::steam;
 // W (reconstruction policy): the original's lobby creation is in protected code that was not recovered
 // (docs/phase3_vm_networking.md section 4). The host creates a lobby once the game has run for this long without
 // joining one, so a friend can join through a Steam invite / "Join game".
+// TODO(known-issue): the original's lobby-creation trigger is not recovered (W); a fixed delay stands in (docs/TODO.md).
 constexpr float kAutoHostDelaySeconds = 20.0f;
 
 std::unique_ptr<session::Session> g_session;

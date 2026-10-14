@@ -91,6 +91,8 @@ struct ParamsState {
 
     // ---- #4 text lookup override (S, nrsc 0x180028ac0) ----
     // Per-category handler map (std::map<u32, std::function> at *(ctx[0x50]+0x20)). Filled by protected code (U): empty.
+    // TODO(known-issue): the text key table / handlers are filled by protected code and not recovered, so no text
+    // override happens (docs/TODO.md).
     std::map<std::uint32_t, TextHandler> text_handlers;
     // The nrsc message repository (FUN_18000a1c0 target, ctx[0x50][1]). Built by protected code from the locale files
     // and the (category, id) -> key table (U): null, and lookups then fall through to the original.

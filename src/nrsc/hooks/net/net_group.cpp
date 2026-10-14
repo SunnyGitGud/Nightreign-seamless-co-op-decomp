@@ -444,6 +444,7 @@ std::vector<HookSpec> build_specs(const std::function<std::uint64_t(unsigned)>& 
     specs.push_back({"hook#9 class id broadcast (site 2)", Kind::CallSite, slot(kSlotSetClassB), addr(&detour_set_class),
                      &s.original_set_class, {}, call_op});
     // #12 / P2: Kind::Inline, not the E9-at-entry of the original, to keep a way back to the game's function (see header).
+    // TODO(known-issue): MinHook's relocation of these two prologues is untested in game (docs/TODO.md).
     specs.push_back({"hook#12 boss list copy", Kind::Inline, slot(kSlotBossListCopy), addr(&detour_boss_list), &s.original_boss_list, {}, {}});
     specs.push_back({"hook#13 rate selector snoop", Kind::CallSite, slot(kSlotRateSnoop), addr(&detour_rate_snoop),
                      &s.original_rate_snoop, {}, call_op});

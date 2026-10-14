@@ -13,7 +13,10 @@ Seamless Co-op for **Elden Ring Nightreign** (`nightreign.exe`).
 **Rules.** Read-only analysis of the shipped files (Ghidra 12.1.2 via REA, `objdump`, byte reads); the DLL and the game exe are never
 modified or run natively. Since 2026-10-14 the scope includes hooks, signatures, `server_manager` and the Themida-virtualized functions.
 Those are emulated only in Unicorn on Linux (`devirt/`). The gap-closing plan is [docs/plan_gaps.md](docs/plan_gaps.md). Hooks are documented
-([docs/hooks.md](docs/hooks.md)) but not rebuilt as code.
+([docs/hooks.md](docs/hooks.md)) and rebuilt as code (`src/nrsc/hooks/`).
+
+**Start here:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (modules, start-up order), [docs/BUILD.md](docs/BUILD.md) (build and test),
+[docs/TODO.md](docs/TODO.md) (known problems), [docs/REFACTOR_PLAN.md](docs/REFACTOR_PLAN.md) (2026-10-15 refactor audit).
 
 **Relationship to `ersc.dll`.** Same author and framework, different program. See
 [docs/baseline.md](docs/baseline.md) §3. Nothing from `../reconstruction/` is assumed to hold for `nrsc.dll`
@@ -38,8 +41,11 @@ unless re-verified here.
 ## Build
 
 ```sh
-cmake -S . -B build && cmake --build build -j && (cd build && ctest)
+./build.sh          # check, host build, 341 tests, Windows nrsc.dll (clang-cl + xwin), package to out/package
+./build.sh --help   # options; NRSC_GAME_EXE=<nightreign.exe> enables the real-binary tests
 ```
+
+Details, dependencies and troubleshooting: [docs/BUILD.md](docs/BUILD.md). The in-game test install `dist/` is never written by the build.
 
 ## Layout
 
@@ -47,6 +53,8 @@ cmake -S . -B build && cmake --build build -j && (cd build && ctest)
 |---|---|
 | `evidence/` | `overview.json`, `redirected_functions.json` (7 protected stubs), `source_paths.txt`, `strings_rdata.txt`, `sha256.txt`, `pseudocode/` (incl. the hook installer `0x18001edb0.c`) |
 | `tools/` | `pe_baseline.py` (PE baseline), `func_of.py` (address → .pdata function), `decode_sse_strings.py` (static decoder for XOR/SSE stack strings) |
+| `build.sh`, `build.ps1` | one-command build (Linux reference; Windows/MSVC) |
+| `src/nrsc/core/` | `FatalError`, `raw_memory` (unaligned field access), `version` |
 | `src/nrsc/config/` | `ini_parser`, `ini_reader`, `settings` |
 | `src/nrsc/locale/` | `message_repository` (loader, lookup, override) |
 | `src/nrsc/cs/` | `world_chr_man`, `bloodstain_man`, `auto_control_api` |
@@ -60,7 +68,10 @@ cmake -S . -B build && cmake --build build -j && (cd build && ctest)
 | `docs/dantelion_memory.md` | memory block resize |
 | `src/nrsc/server/` | Steam lobby, P2P message bus, leaderboard, task timer |
 | `src/nrsc/signatures/` | Pattern16 parser, scanner, resolver, RTTI lookup, generated `signature_table.inc` |
-| `cmake/` | per-module fragments selected by `NRSC_MODULES` |
+| `src/nrsc/hooks/` | installer, `hook_filter` (disable list, held-back hooks), detour groups `world/`, `params/`, `net/` |
+| `src/nrsc/session/`, `src/nrsc/platform/` | session layer; Win32/POSIX code memory, MinHook back end, Steam adapter |
+| `src/nrsc/dll/` | exports, init thread, log, fatal box, crash log, session driver |
+| `cmake/` | per-module fragments selected by `NRSC_MODULES` (`nrsc_add_module()`), MinHook, DLL target, toolchain |
 | `tools/resolve_signatures.py`, `tools/gen_signature_table.py` | resolve the table against `nightreign.exe`; regenerate `signature_table.inc` (`--check`) |
 | `tools/linux/` | memory-only runtime collector for the game under Wine/Proton, and its self-test |
 | `devirt/` | Unicorn harness (`tools/boundary2.py` is current), results in `out/v2/` |
