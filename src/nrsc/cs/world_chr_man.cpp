@@ -1,9 +1,9 @@
 #include "nrsc/cs/world_chr_man.hpp"
 
-#include <cstring>
 #include <string>
 
 #include "nrsc/core/fatal_error.hpp"
+#include "nrsc/core/raw_memory.hpp"
 
 namespace nrsc::cs {
 
@@ -11,12 +11,7 @@ namespace {
 
 constexpr const char* kSourceFile = "nrsc\\cs\\world_chr_man\\world_chr_man.cpp";
 
-template <typename T>
-T load(const std::byte* p) {
-    T v;
-    std::memcpy(&v, p, sizeof v);
-    return v;
-}
+using raw::load;
 
 }  // namespace
 

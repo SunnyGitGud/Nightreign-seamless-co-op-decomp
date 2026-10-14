@@ -3,23 +3,14 @@
 // evidence/hooks/detours/group1..4.md). The detours never name game types: they read and write fields at offsets.
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
+
+#include "nrsc/core/raw_memory.hpp"
 
 namespace nrsc::hooks::world::layout {
 
-template <class T>
-inline T load(const void* base, std::size_t offset) {
-    T value;
-    std::memcpy(&value, static_cast<const std::byte*>(base) + offset, sizeof value);
-    return value;
-}
-
-template <class T>
-inline void store(void* base, std::size_t offset, T value) {
-    std::memcpy(static_cast<std::byte*>(base) + offset, &value, sizeof value);
-}
-
-inline const void* load_ptr(const void* base, std::size_t offset) { return load<const void*>(base, offset); }
+using raw::load;
+using raw::load_ptr;
+using raw::store;
 
 // --- CS::PartyMemberInfo (ctor 0x140aec960; nrsc layout from the P10 detour 0x180026c50, grade C) ------------------
 inline constexpr std::size_t kPartyInfoSize = 0x180;      // the game allocates 0xf0 (3 slots)

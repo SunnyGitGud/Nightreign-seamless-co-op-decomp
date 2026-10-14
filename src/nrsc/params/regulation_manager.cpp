@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "nrsc/core/fatal_error.hpp"
+#include "nrsc/core/raw_memory.hpp"
 
 namespace nrsc::params {
 
@@ -10,14 +11,8 @@ namespace {
 
 constexpr const char* kSourceFile = "nrsc\\mod\\param_repository\\param_repository.cpp";
 
-template <typename T>
-T load(const std::byte* p) {
-    T v;
-    std::memcpy(&v, p, sizeof v);
-    return v;
-}
-
-void store(std::byte* p, float v) { std::memcpy(p, &v, sizeof v); }
+using raw::load;
+using raw::store;
 
 std::optional<float> find(const std::unordered_map<std::int32_t, float>& m, std::int32_t k) {
     const auto it = m.find(k);
@@ -83,9 +78,9 @@ void RegulationManager::build(int set, const RowSource& rows) {
             const float damage = scaled_value(preferences_.damage_scaling, d_damage, n);
             const float posture_raw = scaled_value(preferences_.posture_scaling, d_posture, n);
             const float posture = kMinPosture > posture_raw ? kMinPosture : posture_raw;  // maxss
-            for (const std::size_t off : kHealthFields) store(row.data() + off, health);
-            for (const std::size_t off : kDamageFields) store(row.data() + off, damage);
-            store(row.data() + kPostureField, posture);
+            for (const std::size_t off : kHealthFields) store<float>(row.data(), off, health);
+            for (const std::size_t off : kDamageFields) store<float>(row.data(), off, damage);
+            store<float>(row.data(), kPostureField, posture);
 
             record.spEffect_ids[static_cast<std::size_t>(i)] = static_cast<std::int32_t>(id);
             spEffect_overrides->second.try_emplace(id, row.data());

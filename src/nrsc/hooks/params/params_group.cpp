@@ -4,6 +4,7 @@
 #include <cstring>
 #include <exception>
 
+#include "nrsc/core/raw_memory.hpp"
 #include "nrsc/hooks/groups.hpp"
 #include "nrsc/params/param_file.hpp"
 
@@ -11,17 +12,8 @@ namespace nrsc::hooks::params {
 
 namespace {
 
-
-template <class T>
-T load(const void* base, std::size_t offset) {
-    T v;
-    std::memcpy(&v, static_cast<const std::uint8_t*>(base) + offset, sizeof v);
-    return v;
-}
-template <class T>
-void store(void* base, std::size_t offset, T v) {
-    std::memcpy(static_cast<std::uint8_t*>(base) + offset, &v, sizeof v);
-}
+using raw::load;
+using raw::store;
 
 std::unique_ptr<ParamsState>& state_slot() {
     static std::unique_ptr<ParamsState> s;

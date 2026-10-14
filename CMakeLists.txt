@@ -68,6 +68,7 @@ if(NRSC_BUILD_TESTS)
   enable_testing()
   find_package(GTest REQUIRED)
   add_executable(nrsc_tests
+    tests/core/raw_memory_test.cpp
     tests/config/ini_parser_test.cpp
     tests/config/ini_reader_test.cpp
     tests/config/settings_test.cpp

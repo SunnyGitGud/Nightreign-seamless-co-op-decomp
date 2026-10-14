@@ -5,22 +5,15 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "nrsc/core/raw_memory.hpp"
 #include "nrsc/signatures/signature_table.hpp"
 
 namespace nrsc::hooks::net {
 
 namespace {
 
-template <typename T>
-T load(const void* base, std::size_t off) {
-    T v;
-    std::memcpy(&v, static_cast<const std::uint8_t*>(base) + off, sizeof(T));
-    return v;
-}
-template <typename T>
-void store(void* base, std::size_t off, T v) {
-    std::memcpy(static_cast<std::uint8_t*>(base) + off, &v, sizeof(T));
-}
+using raw::load;
+using raw::store;
 template <typename Fn>
 Fn fn(void* p) {
     return reinterpret_cast<Fn>(p);

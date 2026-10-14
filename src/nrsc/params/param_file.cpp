@@ -1,8 +1,8 @@
 #include "nrsc/params/param_file.hpp"
 
-#include <cstring>
 
 #include "nrsc/core/fatal_error.hpp"
+#include "nrsc/core/raw_memory.hpp"
 
 namespace nrsc::params {
 
@@ -10,12 +10,7 @@ namespace {
 
 constexpr const char* kSourceFile = "nrsc\\mod\\param_repository\\param_repository.cpp";
 
-template <typename T>
-T load(const std::byte* p) {
-    T v;
-    std::memcpy(&v, p, sizeof v);
-    return v;
-}
+using raw::load;
 
 }  // namespace
 
