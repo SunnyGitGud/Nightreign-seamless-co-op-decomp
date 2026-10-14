@@ -1,0 +1,1 @@
+# Diagnostic: hook-name prefixes to skip, one per line. "no-auto-host" = do not create a lobby. Empty = normal.

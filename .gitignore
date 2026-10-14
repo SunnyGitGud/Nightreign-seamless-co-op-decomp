@@ -1,0 +1,28 @@
+# Build trees (CMake/Ninja) and packaged output
+/build/
+/build-*/
+/out/
+
+# Test package: keep the docs and the ME3 profile, not the built DLL, map or run logs
+/dist/nrsc.map
+/dist/SeamlessCoop/nrsc.dll
+/dist/SeamlessCoop/*.log
+
+# Large or machine-specific evidence (runtime captures are ~16 GB; Steam config backups hold personal data)
+/evidence/runtime/
+/evidence/steam-config-backup-*/
+
+# Devirtualization / phase-3 working output and the local Python venv
+/devirt/.venv/
+/devirt/out/
+/phase3/out/
+
+# Python, editor and OS clutter
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+*.swp
+.DS_Store
+compile_commands.json
+.cache/
