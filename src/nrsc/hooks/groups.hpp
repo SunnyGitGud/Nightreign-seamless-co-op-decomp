@@ -9,6 +9,8 @@
 
 namespace nrsc::hooks::groups {
 
+using BuildFn = std::vector<HookSpec> (*)(const signatures::SignatureTable&, const config::Settings&);
+
 // Party size and world state: P0, P5-P8, P10-P16, hooks.json #1, #6, #17, #20-#27 (src/nrsc/hooks/world/).
 std::vector<HookSpec> world(const signatures::SignatureTable& table, const config::Settings& settings);
 

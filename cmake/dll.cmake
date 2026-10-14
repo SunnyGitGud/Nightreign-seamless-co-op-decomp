@@ -10,6 +10,9 @@ add_library(nrsc_dll SHARED
   src/nrsc/dll/init.cpp
   src/nrsc/dll/session_driver.cpp
   src/nrsc/dll/crash_log.cpp
+  src/nrsc/dll/fatal_box.cpp
+  src/nrsc/dll/live_image.cpp
+  src/nrsc/dll/log.cpp
 )
 set_target_properties(nrsc_dll PROPERTIES OUTPUT_NAME nrsc PREFIX "")
 target_link_libraries(nrsc_dll PRIVATE nrsc_core nrsc_minhook kernel32 user32 psapi)

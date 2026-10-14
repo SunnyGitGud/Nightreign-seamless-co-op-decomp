@@ -8,7 +8,7 @@
 #include <string>
 
 #include "nrsc/core/fatal_error.hpp"
-#include "nrsc/dll/init.hpp"
+#include "nrsc/dll/log.hpp"
 #include "nrsc/platform/steam/steam_adapter.hpp"
 #include "nrsc/platform/steam/steam_callbacks.hpp"
 #include "nrsc/session/session.hpp"

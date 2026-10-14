@@ -1,4 +1,5 @@
 # hooks module (WP6): installer + platform code memory (+ MinHook back end on Windows).
+nrsc_add_module(SOURCES src/nrsc/hooks/hook_filter.cpp TESTS tests/hooks/hook_filter_test.cpp)
 if(WIN32)
   include(${CMAKE_CURRENT_LIST_DIR}/minhook.cmake)
   nrsc_add_module(SOURCES src/nrsc/hooks/installer.cpp src/nrsc/platform/win_code_memory.cpp

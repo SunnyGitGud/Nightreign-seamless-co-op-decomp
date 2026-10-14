@@ -12,7 +12,7 @@
 #include <cstdint>
 #include <cstdio>
 
-#include "nrsc/dll/init.hpp"
+#include "nrsc/dll/log.hpp"
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 

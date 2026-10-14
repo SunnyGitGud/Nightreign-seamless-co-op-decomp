@@ -3,6 +3,7 @@
 #include <functional>
 #include <string_view>
 
+#include "nrsc/core/version.hpp"
 #include "nrsc/server/core_state.hpp"
 #include "nrsc/server/peer.hpp"
 #include "nrsc/server/steam_iface.hpp"
@@ -13,7 +14,7 @@ namespace nrsc::server {
 inline constexpr std::string_view kLobbyTypeKey = "nrsc_lobby_type";                           // C (0x180064844)
 inline constexpr std::string_view kMasterLobby = "nrsc_ynx3_seamless_master_lobby";            // C, 31 chars + NUL = 0x20
 inline constexpr std::string_view kLobbyVersionKey = "nrsc_lobby_version";                     // C (0x180064c1b)
-inline constexpr std::string_view kModVersion = "1.1.3";                                       // C (0x18014d82a)
+inline constexpr std::string_view kModVersion = nrsc::kModVersion;                            // C (0x18014d82a)
 inline constexpr std::uint32_t kLeaveMask = 0x10114;  // EChatMemberStateChange 2|4|8|16 = Left|Disconnected|Kicked|Banned
 inline constexpr std::uint32_t kChatEntered = 1;
 inline constexpr std::uint32_t kChatLeft = 2, kChatDisconnected = 4, kChatKicked = 8, kChatBanned = 16;
