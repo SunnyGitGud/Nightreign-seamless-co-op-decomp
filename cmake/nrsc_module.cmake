@@ -1,0 +1,16 @@
+# nrsc_add_module(SOURCES <files...> [WIN32_SOURCES <files...>] [TESTS <files...>])
+# Adds a module's sources to nrsc_core and its tests to nrsc_tests (when tests are built). Paths are relative to the
+# project root. Used by the per-module fragments that NRSC_MODULES selects.
+function(nrsc_add_module)
+  cmake_parse_arguments(ARG "" "" "SOURCES;WIN32_SOURCES;TESTS" ${ARGN})
+  list(TRANSFORM ARG_SOURCES PREPEND "${PROJECT_SOURCE_DIR}/")
+  target_sources(nrsc_core PRIVATE ${ARG_SOURCES})
+  if(WIN32 AND ARG_WIN32_SOURCES)
+    list(TRANSFORM ARG_WIN32_SOURCES PREPEND "${PROJECT_SOURCE_DIR}/")
+    target_sources(nrsc_core PRIVATE ${ARG_WIN32_SOURCES})
+  endif()
+  if(TARGET nrsc_tests AND ARG_TESTS)
+    list(TRANSFORM ARG_TESTS PREPEND "${PROJECT_SOURCE_DIR}/")
+    target_sources(nrsc_tests PRIVATE ${ARG_TESTS})
+  endif()
+endfunction()
