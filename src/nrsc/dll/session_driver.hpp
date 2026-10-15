@@ -17,7 +17,8 @@ namespace nrsc::dll {
 // in which case the game runs without co-op.
 std::optional<hooks::HookSpec> session_driver_hook();
 
-// Diagnostic: when false, no lobby is auto-hosted (set from the "no-auto-host" line of nrsc_disable_hooks.txt).
-void set_auto_host_enabled(bool enabled);
+// Diagnostic: when false, the ISteamMatchmaking CreateLobby/LeaveLobby hooks are not installed, so hosting in game makes
+// a vanilla lobby (set from the "no-auto-host" line of nrsc_disable_hooks.txt; the name is kept for existing files).
+void set_lobby_hooks_enabled(bool enabled);
 
 }  // namespace nrsc::dll

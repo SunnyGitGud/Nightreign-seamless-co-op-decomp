@@ -47,6 +47,8 @@ struct MockNet : server::ISteamNetworkingMessages {
     }
     std::vector<server::ReceivedMessage> ReceiveMessagesOnChannel(int, int) override { return std::exchange(inbox, {}); }
     bool AcceptSessionWithUser(SteamId r) override { accepted.push_back(r); return true; }
+    bool CloseSessionWithUser(SteamId r) override { closed.push_back(r); return true; }
+    std::vector<SteamId> closed;
     // control packets sent: id 3 channel 1
     std::size_t controls() const {
         std::size_t n = 0;
@@ -342,6 +344,32 @@ TEST_F(Fixture, HostFlowCreatesLobbyTagsDataAndAttachesOnEnter) {
     EXPECT_FALSE(s->host_start_session());  // in a lobby
     s->leave_session();
     EXPECT_EQ(s->flags() & (kInLobby | kLobbyCreated), 0u);
+}
+// The lobby trigger (devirt 2.11): the game's CreateLobby through the vtable hook.
+TEST_F(Fixture, GamePublicCreateLobbyBecomesFriendsOnlySeamlessLobby) {
+    EXPECT_EQ(s->on_game_create_lobby(kLobbyTypePublic), kLobbyTypeFriendsOnly);
+    EXPECT_TRUE(s->state().core.lobby_create_pending);
+    EXPECT_TRUE(lobbies.created.empty());  // the game's own call creates it, not the session
+    s->on_lobby_created(kLobby);
+    EXPECT_EQ(mm.GetLobbyData(kLobby, "nrsc_lobby_type"), "nrsc_ynx3_seamless_master_lobby");
+    EXPECT_NE(s->flags() & kLobbyCreated, 0u);
+}
+TEST_F(Fixture, GameNonPublicCreateLobbyPassesThrough) {
+    for (int t : {0, 1, 3}) EXPECT_EQ(s->on_game_create_lobby(t), t);
+    EXPECT_FALSE(s->state().core.lobby_create_pending);
+    s->on_lobby_created(kLobby);
+    EXPECT_EQ(mm.GetLobbyData(kLobby, "nrsc_lobby_type"), "");  // not tagged
+}
+TEST_F(Fixture, GameLeaveOfCurrentLobbyClosesPeerSessionsAndDetaches) {
+    join_lobby();
+    s->on_game_leave_lobby(999);  // another lobby: nothing
+    EXPECT_TRUE(ns.attached());
+    EXPECT_TRUE(net.closed.empty());
+    s->on_game_leave_lobby(kLobby);
+    EXPECT_FALSE(ns.attached());
+    EXPECT_FALSE(s->in_lobby());
+    EXPECT_EQ(net.closed.size(), 2u);  // host and guest
+    EXPECT_TRUE(lobbies.left.empty());  // the game's own LeaveLobby follows; the session does not call it again
 }
 TEST_F(Fixture, ChatUpdateJoinAndLeave) {
     join_lobby();

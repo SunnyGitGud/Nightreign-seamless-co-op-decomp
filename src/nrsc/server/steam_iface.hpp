@@ -57,6 +57,8 @@ public:
     virtual std::vector<ReceivedMessage> ReceiveMessagesOnChannel(int channel, int max_messages) = 0;
     // vtbl+0x10, called by the SessionRequest callback 0x1800644c0 (C). Not pure, so existing mocks need no change.
     virtual bool AcceptSessionWithUser(SteamId /*remote*/) { return false; }
+    // vtbl+0x18, called by the LeaveLobby detour 0x18002bc70 for every active peer (C, asm 0x18002bd56). Not pure.
+    virtual bool CloseSessionWithUser(SteamId /*remote*/) { return false; }
 };
 
 // One LeaderboardEntry_t as read at 0x18003d6a0 (steam id first, then up to 2 detail ints).

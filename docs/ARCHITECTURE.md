@@ -81,7 +81,8 @@ Rules:
       3. `filter_hooks` (disabled, then held back).
       4. The world `on_fatal` handler.
       5. `install` each spec (`installed <name>`).
-   6. The auto-host switch, then the session driver hook on `SteamAPI_RunCallbacks`.
+   6. The lobby-hook switch (`no-auto-host`), then the session driver hook on `SteamAPI_RunCallbacks`; the ISteamMatchmaking
+      CreateLobby/LeaveLobby vtable hooks are installed later, when the session starts (devirt.md 2.11).
    7. `enable_inline()`.
 3. From then on everything runs on the game thread. Detours run when the game calls them. The session layer ticks after
    each `SteamAPI_RunCallbacks`, so callbacks, ticks and detours share one thread.

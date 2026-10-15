@@ -29,7 +29,8 @@ public:
     virtual bool GetSessionConnectionInfo(server::SteamId remote, std::int32_t& ping_ms) = 0;
 };
 
-inline constexpr int kLobbyTypeFriendsOnly = 1;  // k_ELobbyTypeFriendsOnly (W: the original's value is U)
+inline constexpr int kLobbyTypeFriendsOnly = 1;  // k_ELobbyTypeFriendsOnly (C: the CreateLobby hook forwards Public as 1)
+inline constexpr int kLobbyTypePublic = 2;       // k_ELobbyTypePublic: the game's matchmaking lobby (docs/devirt.md 2.11)
 inline constexpr int kLobbyMaxMembers = 6;       // peer pool 5 + local player (S from the pool size; W)
 
 }  // namespace nrsc::session

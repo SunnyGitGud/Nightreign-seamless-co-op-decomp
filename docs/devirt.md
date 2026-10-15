@@ -370,6 +370,45 @@ Fix over realimage.py: Unicorn ignores a PC change made inside the fetch hook, s
 
 **Still open (U).** The meaning of the two data payloads (they come from game code that is not executed: sub-channel 3 = 28 B, sub-channel 4 = 504 B), the source of the heartbeat byte `b`, the exact text the F4 path shows, the `WGame+0x9a50` branch's purpose.
 
+### 2.11 State filled by protected startup code; the lobby trigger (2026-10-16)
+
+`tools/realimage3.py --dump` (results `out/v5/startup_dump.json`) reads the parked startup state of 2.10: the hooks context (`rcx` of the installer
+`0x18001edb0`, `0x7ff0001ef7d0` in the emulation), the maps and vectors protected code fills, a diff of the game image against the file (every patch
+resolved through its relay and thunk to the closure `{vtbl, ctx, detour}`), and the hooked vtable slots of the fake Steam interfaces. Scenarios
+`scenarios/s6_lobby.py` call the hooked slots as the game would. Grades: C for what the emulation shows.
+
+**VM entries (C).** A scan of `.text` for transfers into `.themida` finds 9: the 7 of section 2, a jump inside `0x180061140` (`0x18006260b`), and
+**`0x18002bc30`**, a function whose head is virtualised and which nothing in readable code calls.
+
+**Regulation targets (C).** `[[ctx+0x70]+0x10]` (regulation manager) `+0x18/+0x20` holds **80 int32 ids, 7700..7779**, already at the park point;
+`+0x14` (next id) = `0x7fff0000`, ready/built = 0/0. This is the list of wiring_params.md that was "not recoverable".
+
+**Text handler map (C).** `*(ctx[0x50]+0x20)` has **one node: key 200 (`0xc8`)**, value a `std::function` (vtable `0x180147ad0`) holding
+**`0x18001e1c0`**, the message override. Text module `ctx[0x50]`: `+0` = `X` (the frame task's state, so the override's `*(ctx[0]+400)` is
+`X+0x190` = member count, phase3 2.2 (5)), `+8` message repository, `+0x10` = game `0x14086a7a0`.
+
+**Game image patches (C).** 399 changed regions: 263 `0x72 -> 0xEB` bytes, the rest are the hooks of hooks.md; each call/jump/vtable patch maps to
+its documented detour. `0x18002bc30` is not among them.
+
+**The lobby trigger (C).** The hooks installer also patches the **vtable of the game's `ISteamMatchmaking` (SteamMatchMaking009) object**:
+slot **13 `CreateLobby` -> thunk -> closure (vtable `0x180147590`, invoker `0x18002be70`) -> `0x18002bc30`**, and slot **15 `LeaveLobby` ->
+`0x18002bc70`** (readable). Calling slot 13 as the game does:
+
+| `CreateLobby(type, max)` from the game | forwarded to Steam | lobby state |
+|---|---|---|
+| 0 Private, 1 FriendsOnly, 3 Invisible | unchanged | nothing |
+| **2 Public** (the game hosting) | **FriendsOnly (1)**, same `max` | `L+0x158 = 1` (create pending; `xchg` at `0x1801f30f5`), `L = [[ctx+0x30]+0x80]` |
+
+The readable `LobbyCreated` callback `0x180064a50` then tags the lobby (`nrsc_lobby_type` / `nrsc_lobby_version`) because the flag is set. So
+the Seamless lobby is created when the game itself creates its public matchmaking lobby, as FriendsOnly; there is no timer and no menu.
+`LeaveLobby(lobby)` (`0x18002bc70`, asm C): if `lobby == L+0x120`, for every active peer `CloseSessionWithUser(identity{SteamID})`
+(`ISteamNetworkingMessages` vtbl+0x18, under the core lock), then reset the lobby fields (`L+0x120..0x188`, the three pending bytes), then
+tail-jump to the original. Another lobby id goes straight to the original.
+
+Wired into the rebuild (2026-10-16): `session_driver` installs both slots as `Kind::VtableSlot` once the Steam adapter exists
+(`Session::on_game_create_lobby / on_game_leave_lobby`), the 20 s auto-host is gone; `params::wire` uses `scaling_target_ids()` and releases #7/#10;
+the text handler map, key table, fixed texts and the english-then-game-language order are wired (`params_group.cpp`). Not yet tested in game.
+
 ## 3. IAT ambiguity (`out/v2/iat_resolved.json`)
 
 Before: **62** slots with more than one candidate (`iat_names.json`). After: **56 resolved uniquely** (32 C, 24 S), **5 best guess W**, **1 unresolved U** => 6 still ambiguous. Method: scan all 927 `call/jmp [IAT]` sites

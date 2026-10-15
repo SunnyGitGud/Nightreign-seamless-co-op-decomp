@@ -11,9 +11,9 @@ Grades: **C** confirmed, **S** strongly inferred, **W** weakly inferred, **U** u
 | Message lookup | **C**, reconstructed | readable: `FUN_18000a1c0`, catch funclet `FUN_18000a7d0` |
 | Message override (id `0x52409`, fallback to the game) | **C**, reconstructed | readable: `FUN_18001e1c0` |
 | UTF-8 → UTF-16 | **C**, reconstructed | `FUN_18000a920` → `MultiByteToWideChar(0xfde9, 0, …)` |
-| (category, id) → key table | **U** | The 8 key strings are in `.rdata`, but no readable code or data references them (searched for `lea` targets, 64-bit pointers in `.rdata`/`.data`, imm64 and RVA32 in `.text`/`.themida`). They are built only by protected code. |
-| Which fixed texts sit at which (category, id) | **U** | The texts are in `.rdata` (below); the banner, welcome and save texts have no readable references |
-| Language selection and English-first order | **U** | The loader has no readable callers (only an EH IP-to-state entry at `0x180174930` and a `.themida` reference). `"english"` does not appear in the file in any searched form. |
+| (category, id) → key table | **C** (emulation, devirt.md 2.9; wired in `params_group.cpp`) | The 8 key strings are in `.rdata`, but no readable code or data references them (searched for `lea` targets, 64-bit pointers in `.rdata`/`.data`, imm64 and RVA32 in `.text`/`.themida`). They are built only by protected code. |
+| Which fixed texts sit at which (category, id) | **C** (emulation, devirt.md 2.9) | The texts are in `.rdata` (below); the banner, welcome and save texts have no readable references |
+| Language selection and English-first order | **C** (emulation: `english`, then ISteamApps::GetCurrentGameLanguage with english as fallback) | The loader has no readable callers (only an EH IP-to-state entry at `0x180174930` and a `.themida` reference). `"english"` does not appear in the file in any searched form. |
 
 So the reconstructed `MessageRepository` takes the key table and fixed-text placement as **inputs**.
 

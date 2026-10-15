@@ -65,7 +65,16 @@ public:
     // Per-frame. Polls the bus, runs FrameTask phases 1-5 and the party tracker (only while attached), then runs one job.
     void tick(float dt);
 
-    // ---- W: user actions ----
+    // ---- the game's own lobby calls, seen through nrsc's ISteamMatchmaking vtable hooks (docs/devirt.md 2.11, C) ----
+    // CreateLobby (slot 13, VM detour 0x18002bc30): a Public lobby (the game hosting) becomes the Seamless lobby: the
+    // create-pending flag is set and the type to forward is FriendsOnly. Any other type is forwarded unchanged.
+    // Returns the lobby type to pass to the original. Calls made by this Session itself pass through unchanged.
+    int on_game_create_lobby(int lobby_type);
+    // LeaveLobby (slot 15, detour 0x18002bc70): leaving the current lobby closes the Steam session with every active
+    // peer and resets the lobby state; the caller then runs the original. Calls made by this Session pass through.
+    void on_game_leave_lobby(SteamId lobby);
+
+    // ---- user actions (not called by the DLL any more: the trigger is the game's CreateLobby) ----
     bool host_start_session();   // CreateLobby; false if already in/creating a lobby
     void leave_session();        // LeaveLobby + detach + clear state
 

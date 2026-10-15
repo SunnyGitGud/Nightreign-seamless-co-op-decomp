@@ -7,6 +7,14 @@ namespace nrsc::session {
 
 namespace {
 constexpr std::uint32_t kEnterSuccess = 1;  // EChatRoomEnterResponse::k_EChatRoomEnterResponseSuccess
+
+// Set while this Session itself calls CreateLobby / LeaveLobby. Those calls go through the same patched vtable and
+// arrive back in on_game_*; the mutex is already held then, so they must pass through untouched.
+thread_local bool t_own_lobby_call = false;
+struct OwnLobbyCall {
+    OwnLobbyCall() { t_own_lobby_call = true; }
+    ~OwnLobbyCall() { t_own_lobby_call = false; }
+};
 }
 
 Session::Session(SteamInterfaces steam, SteamId own_id, hooks::net::NetState& net, PartyTracker::Setter party_setter,
@@ -53,7 +61,10 @@ Session::~Session() {
 void Session::attach_locked() { net_.attach(bus_, peers_); }
 
 void Session::detach_locked(bool leave_steam) {
-    if (leave_steam) lifecycle_.leave();
+    if (leave_steam) {
+        OwnLobbyCall own;
+        lifecycle_.leave();
+    }
     if (net_.bus == &bus_) net_.detach();
     for (std::size_t i = 0; i < peers_.size(); ++i) server::PeerList::reset(peers_.slot(i));
     frame_.clear_pings();
@@ -131,7 +142,27 @@ void Session::tick(float dt) {
 // ---- user actions ----
 bool Session::host_start_session() {
     std::lock_guard lk(mutex_);
+    OwnLobbyCall own;
     return lifecycle_.host_start();
+}
+
+int Session::on_game_create_lobby(int lobby_type) {
+    if (t_own_lobby_call || lobby_type != kLobbyTypePublic) return lobby_type;
+    std::lock_guard lk(mutex_);
+    state_.core.lobby_create_pending = true;  // L+0x158 = 1 (xchg at 0x1801f30f5 in the VM detour)
+    return kLobbyTypeFriendsOnly;
+}
+
+void Session::on_game_leave_lobby(SteamId lobby) {
+    if (t_own_lobby_call) return;
+    std::lock_guard lk(mutex_);
+    if (lobby == 0 || lobby != state_.core.lobby_id) return;  // 0x18002bca8: only the current lobby
+    for (std::size_t i = 0; i < peers_.size(); ++i) {           // 0x18002bcf2..: active peers (flags +0x128 bit 0)
+        const server::Peer& p = peers_.slot(i);
+        if (p.steam_id != 0 && (p.flags & server::kPeerActive)) steam_.messages.CloseSessionWithUser(p.steam_id);
+    }
+    state_.core.lobby_create_pending = false;
+    detach_locked(false);  // the game's own LeaveLobby call follows (the detour tail-jumps to the original)
 }
 
 void Session::leave_session() {

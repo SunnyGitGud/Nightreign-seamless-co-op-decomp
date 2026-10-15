@@ -28,10 +28,10 @@ Grades C/S/W/U. Live evidence = `evidence/runtime/20261015-020739/020849/020955*
 | P3 `+0x194` byte | 0 live (default settings; +0x190 = 2 next to it). Kept 0. What sets it (a hidden option?) is U. | S |
 | `row_source` | `find_row_in_repository(*(byte**)table.at(0x1c0), param, id).row`; null repo gives no rows (no fatal) | C |
 | first generated row id | live manager +0x14 = 0x7fff0320 with an 80-entry target vector (begin 0x165ff710, end 0x165ff850); 10 ids per target gives start **0x7fff0000** (was 0x7f000000) | S |
-| `regulation.target_ids` | 80 ids in the original, filled by protected code; the vector's heap region is not in any snapshot (0x165ff710 lies in the undumped 0x4960000 mapping). **Not recoverable.** `wire` sets `target_source`, an enumerator of all row ids of param 0x4f, run once at #10 before the first build. | W (guess that the 80 are the 0x4f rows; unverified) |
+| `regulation.target_ids` | 80 ids filled by protected startup code: **7700..7779** (read from the regulation manager in the real-image emulation, devirt.md 2.11). `wire` sets `target_source = scaling_target_ids()`, run once at #10 before the first build; #7/#10 are no longer held back. | C (emulation), in-game untested |
 | preferences | live manager +0x08 object: +4 = 1, floats 1.0 x3 at +0x30..+0x38 with default ini: matches `Settings.preferences` | C |
 | `messages` | `<dll dir>/locale/english.json` loaded with `load_locale`; null (vanilla) when missing or broken. Language choice and English-first order are U (localisation.md). Live: the repository exists, its locale pointer is set, and both its maps (fixed texts, keys) hold 2 categories. The (category, id) tables sit in an undumped heap region, so the key table stays empty and **nothing is overridden yet**. | S (location), U (table) |
-| `text_handlers` | empty map (U). Live `*(M+0x20)` is unreadable. `devirt/out/v4` lists 4 handlers keyed 0..3 but they look like event handlers (0x180004c80 is hook #2's detour); **pending out/v4**, not used. | U |
+| `text_handlers` | one entry: category 200 -> the override FUN_18001e1c0 (devirt.md 2.11; the 4 handlers of out/v4 were the network message map). The override's special value is the session's member count. | C (emulation) |
 
 ## Unresolved and risks
 

@@ -90,13 +90,18 @@ struct ParamsState {
     void* original_item_visible = nullptr;  // P3: 0x140572c10 (item) -> bool                               (ctx[0x90]+0x48)
 
     // ---- #4 text lookup override (S, nrsc 0x180028ac0) ----
-    // Per-category handler map (std::map<u32, std::function> at *(ctx[0x50]+0x20)). Filled by protected code (U): empty.
-    // TODO(known-issue): the text key table / handlers are filled by protected code and not recovered, so no text
-    // override happens (docs/TODO.md).
+    // Per-category handler map (std::map<u32, std::function> at *(ctx[0x50]+0x20)). Filled at startup by protected code
+    // with exactly one entry, category 200 -> the message override FUN_18001e1c0 (C, docs/devirt.md 2.11); wire() does
+    // the same.
     std::map<std::uint32_t, TextHandler> text_handlers;
-    // The nrsc message repository (FUN_18000a1c0 target, ctx[0x50][1]). Built by protected code from the locale files
-    // and the (category, id) -> key table (U): null, and lookups then fall through to the original.
+    // The nrsc message repository (FUN_18000a1c0 target, ctx[0x50][1]) with the recovered key table and fixed texts
+    // (kMessageKeys / kFixedTexts). Null when the locale files are missing: lookups then fall through to the original.
+    // Replaced once by set_game_language(); read it through current_messages().
     std::shared_ptr<const locale::MessageRepository> messages;
+    // The integer the override formats twice for id 0x52409: *(int*)(*ctx + 400) = the frame task's member count
+    // (X+0x190, phase3 2.2 (5)). The session layer installs the source; 0 until then.
+    std::function<std::int32_t()> text_special_value = [] { return std::int32_t{0}; };
+    std::filesystem::path locale_dir;
 
     // ---- #5 save extension (S, nrsc 0x180028bf0) ----
     // UTF-16 text that replaces the game literal L".sl2" (len 4); ctx[0xc8] is a std::wstring. The original's contents are
@@ -169,6 +174,18 @@ void wire_from_slots(const std::function<std::uint64_t(unsigned)>& slot, const n
 std::shared_ptr<const locale::MessageRepository> load_message_repository(const std::filesystem::path& locale_dir,
                                                                           std::vector<locale::MessageKey> keys = {},
                                                                           std::vector<locale::FixedText> fixed = {});
+// The (category, id) -> key table and the fixed texts the original builds at startup (C, read from the live maps in
+// the real-image emulation, docs/devirt.md 2.9).
+const std::vector<locale::MessageKey>& message_keys();
+const std::vector<locale::FixedText>& fixed_texts();
+// Locale order of the original (C, devirt 2.9): "english" is loaded first, then the game's language
+// (ISteamApps::GetCurrentGameLanguage) with english as its fallback. wire() loads english only (Steam is not up yet);
+// the session layer calls this once Steam answers. Empty or "english" keeps the english repository.
+void set_game_language(const std::string& language);
+std::shared_ptr<const locale::MessageRepository> current_messages();
+// The 80 regulation target ids (C: the regulation manager's vector right after startup in the real-image emulation,
+// 7700..7779, docs/devirt.md 2.11).
+std::vector<std::int32_t> scaling_target_ids();
 // Row ids of one param in a SoloParamRepository (the sorted index of its file), at most `limit`.
 std::vector<std::int32_t> list_row_ids(const std::byte* repository, std::int32_t param_index, std::size_t limit);
 

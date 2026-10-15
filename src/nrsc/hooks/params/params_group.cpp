@@ -38,6 +38,75 @@ ParamsState& params_state() {
     if (!state_slot()) state_slot() = std::make_unique<ParamsState>(config::Settings{});
     return *state_slot();
 }
+namespace {
+// Keeps the text alive for the process lifetime (the game keeps the pointer). Caller holds no lock.
+const char16_t* keep_text(ParamsState& s, std::uint32_t category, std::uint32_t id, std::u16string text) {
+    std::lock_guard lock(s.text_mutex);
+    auto& slot = s.text_cache[{category, id}];
+    if (!slot) {
+        slot = std::make_unique<std::u16string>(std::move(text));
+    } else if (*slot != text) {
+        s.text_retired.push_back(std::move(slot));  // earlier pointers stay valid
+        slot = std::make_unique<std::u16string>(std::move(text));
+    }
+    return slot->c_str();
+}
+
+using GameTextFn = const char16_t* (*)(void*, std::uint32_t, std::uint32_t, std::uint32_t);
+}  // namespace
+
+std::shared_ptr<const locale::MessageRepository> current_messages() {
+    ParamsState& s = params_state();
+    std::lock_guard lock(s.text_mutex);
+    return s.messages;
+}
+
+const std::vector<locale::MessageKey>& message_keys() {
+    static const std::vector<locale::MessageKey> keys = {
+        {200, 0x52409, "MODMESSAGE_YUINEXUSPLAYERCOUNTREMAINING"},
+        {200, 0x1fd69, "MODMESSAGE_YUINEXUSBEGINONEPLAYER"},
+        {200, 0x1fd71, "MODMESSAGE_YUINEXUSBEGINTWOPLAYER"},
+        {200, 0x1fd68, "MODMESSAGE_YUINEXUSBEGINTHREEPLAYER"},
+        {15000, 0, "MODMESSAGE_YUINEXUSNOSEAMLESS"},
+        {15000, 1, "MODMESSAGE_YUINEXUSWRONGSSR"},
+        {15000, 2, "MODMESSAGE_YUINEXUSPAUSED"},
+        {15000, 3, "MODMESSAGE_YUINEXUSRESUMED"},
+    };
+    return keys;
+}
+
+const std::vector<locale::FixedText>& fixed_texts() {
+    // UTF-16 literals of .rdata 0x18014e056 / 0x18014e0be / 0x18014e24a.
+    static const std::vector<locale::FixedText> fixed = {
+        {200, 0x61f9f, u"Elden Ring: Nightreign Seamless Co-op v1.1.3 by Yui"},
+        {203, 0x61ff9, u"Welcome to the seamless co-op mod for Elden Ring: Nightreign!\n[ This is a free mod ]\n"
+                       u"If you have paid for any launchers or packages with this mod then you've been scammed"},
+        {203, 0x61f12, u"This mod uses a separate save, and does not connect to the matchmaking servers.\n"
+                       u"It does not contain an anticheat."},
+    };
+    return fixed;
+}
+
+std::vector<std::int32_t> scaling_target_ids() {
+    std::vector<std::int32_t> ids;
+    for (std::int32_t id = 7700; id < 7780; ++id) ids.push_back(id);
+    return ids;
+}
+
+void set_game_language(const std::string& language) {
+    ParamsState& s = params_state();
+    if (language.empty() || language == "english" || s.locale_dir.empty()) return;
+    try {
+        auto english = locale::load_locale(s.locale_dir, "english", nullptr, {});
+        auto game = locale::load_locale(s.locale_dir, language, english, {});  // missing file: warning + fallback
+        auto repo = std::make_shared<const locale::MessageRepository>(std::move(game), message_keys(), fixed_texts());
+        std::lock_guard lock(s.text_mutex);
+        s.messages = std::move(repo);
+    } catch (...) {
+        // keep the english repository
+    }
+}
+
 ParamsState& reset_params_state(const config::Settings& settings) {
     state_slot() = std::make_unique<ParamsState>(settings);
     return *state_slot();
@@ -55,18 +124,9 @@ const char16_t* detour_text_lookup(void* repo, std::uint32_t version, std::uint3
         return h->second(repo, version, category, id);
     }
     // (2) nrsc message repository (FUN_18000a1c0): non-null result wins (C). The pointer must outlive the call.
-    if (s.messages) {
-        if (auto text = s.messages->lookup(static_cast<std::int32_t>(category), static_cast<std::int32_t>(id))) {
-            std::lock_guard lock(s.text_mutex);
-            auto& slot = s.text_cache[{category, id}];
-            if (!slot) {
-                slot = std::make_unique<std::u16string>(std::move(*text));
-            } else if (*slot != *text) {
-                s.text_retired.push_back(std::move(slot));  // earlier pointers stay valid
-                slot = std::make_unique<std::u16string>(std::move(*text));
-            }
-            return slot->c_str();
-        }
+    if (auto repo_ptr = current_messages()) {
+        if (auto text = repo_ptr->lookup(static_cast<std::int32_t>(category), static_cast<std::int32_t>(id)))
+            return keep_text(s, category, id, std::move(*text));
     }
     // (3) the game's own text.
     auto original = reinterpret_cast<const char16_t* (*)(void*, std::uint32_t, std::uint32_t, std::uint32_t)>(s.original_text_lookup);
@@ -195,7 +255,6 @@ T read_at(std::uint64_t address) {
     return v;
 }
 
-constexpr std::size_t kMaxScalingTargets = 4096;
 
 }  // namespace
 
@@ -279,12 +338,34 @@ void wire_from_slots(const std::function<std::uint64_t(unsigned)>& slot, const c
             const std::byte* r = repo();
             return r ? nrsc::params::find_row_in_repository(r, param, id).row : nullptr;
         };
-        s.target_source = [repo]() { return list_row_ids(repo(), nrsc::params::kScalingParam, kMaxScalingTargets); };
+        s.target_source = [] { return scaling_target_ids(); };
     }
     s.scaling_wired = helpers && session_global && repo_global;
 
-    // #4: nrsc messages from <dll dir>/locale (key table U: nothing is overridden yet).
-    s.messages = load_message_repository(dll_dir / "locale");
+    // #4: nrsc messages from <dll dir>/locale with the recovered tables; english until set_game_language().
+    s.locale_dir = dll_dir / "locale";
+    {
+        auto repo = load_message_repository(s.locale_dir, message_keys(), fixed_texts());
+        std::lock_guard lock(s.text_mutex);
+        s.messages = std::move(repo);
+    }
+    // The one handler the original registers: category 200 -> FUN_18001e1c0 (C, devirt 2.11).
+    s.text_handlers[200] = [](void* repo, std::uint32_t version, std::uint32_t category, std::uint32_t id) -> const char16_t* {
+        ParamsState& st = params_state();
+        auto original = reinterpret_cast<GameTextFn>(st.original_text_lookup);
+        auto msgs = current_messages();
+        if (!msgs) return original ? original(repo, version, category, id) : nullptr;
+        const char16_t* game = nullptr;
+        bool game_called = false;
+        std::u16string text = msgs->override_lookup(
+            static_cast<std::int32_t>(category), static_cast<std::int32_t>(id), st.text_special_value(), [&] {
+                game_called = true;
+                game = original ? original(repo, version, category, id) : nullptr;
+                return game ? std::u16string(game) : std::u16string();
+            });
+        if (game_called && (game ? text == game : text.empty())) return game;  // the game's own text, unchanged
+        return keep_text(st, category, id, std::move(text));
+    };
 }
 
 void wire(const nrsc::signatures::SignatureTable& table, const nrsc::config::Settings& settings,

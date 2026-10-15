@@ -100,10 +100,14 @@ struct Api {
     int(__cdecl* SendMessageToUser)(Iface*, const SteamNetworkingIdentity*, const void*, std::uint32_t, int, int) = nullptr;
     int(__cdecl* ReceiveMessagesOnChannel)(Iface*, int, void**, int) = nullptr;
     bool(__cdecl* AcceptSessionWithUser)(Iface*, const SteamNetworkingIdentity*) = nullptr;
+    bool(__cdecl* CloseSessionWithUser)(Iface*, const SteamNetworkingIdentity*) = nullptr;
     int(__cdecl* GetSessionConnectionInfo)(Iface*, const SteamNetworkingIdentity*, void*, void*) = nullptr;
     void(__cdecl* MessageRelease)(void*) = nullptr;      // SteamAPI_SteamNetworkingMessage_t_Release
     // ISteamUser
     std::uint64_t(__cdecl* GetSteamID)(Iface*) = nullptr;
+    // ISteamApps
+    Iface*(__cdecl* SteamApps)() = nullptr;              // SteamAPI_SteamApps_v008
+    const char*(__cdecl* GetCurrentGameLanguage)(Iface*) = nullptr;
 };
 
 template <typename F>
@@ -158,6 +162,9 @@ public:
         std::string ignored;
         load(api.mod, "SteamAPI_SteamUser_v021", api.SteamUser, ignored);
         load(api.mod, "SteamAPI_ISteamUser_GetSteamID", api.GetSteamID, ignored);
+        load(api.mod, "SteamAPI_ISteamNetworkingMessages_CloseSessionWithUser", api.CloseSessionWithUser, ignored);
+        load(api.mod, "SteamAPI_SteamApps_v008", api.SteamApps, ignored);
+        load(api.mod, "SteamAPI_ISteamApps_GetCurrentGameLanguage", api.GetCurrentGameLanguage, ignored);
         if (!ok) return false;
 
         mm_ = api.SteamMatchmaking();
@@ -179,6 +186,7 @@ public:
 
     server::ISteamMatchmaking& matchmaking() override { return *this; }
     server::ISteamNetworkingMessages& networking() override { return *this; }
+    void* matchmaking_object() override { return mm_; }
 
     // ---- server::ISteamMatchmaking ----
     std::int32_t GetNumLobbyMembers(SteamId lobby) override { return api.GetNumLobbyMembers(mm_, lobby); }
@@ -221,6 +229,11 @@ public:
         const SteamNetworkingIdentity id = make_steamid_identity(remote);
         return api.AcceptSessionWithUser(net_, &id);
     }
+    bool CloseSessionWithUser(SteamId remote) override {
+        if (!api.CloseSessionWithUser) return false;
+        const SteamNetworkingIdentity id = make_steamid_identity(remote);
+        return api.CloseSessionWithUser(net_, &id);
+    }
 
     // ---- extras ----
     void CreateLobby(int lobby_type, int max_members) override {
@@ -237,6 +250,12 @@ public:
         if (state == 0) return false;  // k_ESteamNetworkingConnectionState_None: unknown session
         std::memcpy(&ping_ms, status.b + 4, 4);  // SteamNetConnectionRealTimeStatus_t::m_nPing
         return true;
+    }
+    std::string GameLanguage() override {
+        if (!api.SteamApps || !api.GetCurrentGameLanguage) return {};
+        Iface* apps = api.SteamApps();
+        const char* lang = apps ? api.GetCurrentGameLanguage(apps) : nullptr;
+        return lang ? std::string(lang) : std::string();
     }
     SteamId OwnSteamId() override {
         if (!api.SteamUser || !api.GetSteamID) return 0;

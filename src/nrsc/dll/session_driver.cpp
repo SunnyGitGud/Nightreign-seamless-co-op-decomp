@@ -9,6 +9,7 @@
 
 #include "nrsc/core/fatal_error.hpp"
 #include "nrsc/dll/log.hpp"
+#include "nrsc/hooks/params/params_group.hpp"
 #include "nrsc/platform/steam/steam_adapter.hpp"
 #include "nrsc/platform/steam/steam_callbacks.hpp"
 #include "nrsc/session/session.hpp"
@@ -19,19 +20,22 @@ namespace {
 using platform::steam::ISteamCallbackSink;
 namespace ps = platform::steam;
 
-// W (reconstruction policy): the original's lobby creation is in protected code that was not recovered
-// (docs/phase3_vm_networking.md section 4). The host creates a lobby once the game has run for this long without
-// joining one, so a friend can join through a Steam invite / "Join game".
-// TODO(known-issue): the original's lobby-creation trigger is not recovered (W); a fixed delay stands in (docs/TODO.md).
-constexpr float kAutoHostDelaySeconds = 20.0f;
+// Lobby creation trigger (C, docs/devirt.md 2.11): the original vtable-hooks the game's ISteamMatchmaking object.
+// Slot 13 CreateLobby -> VM detour 0x18002bc30: a Public lobby (the game hosting) sets the create-pending flag and is
+// created as FriendsOnly; the LobbyCreated callback then tags it as the Seamless lobby. Slot 15 LeaveLobby -> 0x18002bc70.
+constexpr unsigned kSlotCreateLobby = 13;
+constexpr unsigned kSlotLeaveLobby = 15;
 
 std::unique_ptr<session::Session> g_session;
 std::unique_ptr<ps::SteamAdapter> g_steam;
 bool g_steam_failed = false;
-bool g_auto_host_done = false;
-bool g_auto_host_enabled = true;
-float g_uptime = 0.0f;
+bool g_lobby_hooks_enabled = true;
 LARGE_INTEGER g_last{}, g_freq{};
+
+using CreateLobbyFn = std::uint64_t (*)(void* self, int lobby_type, int max_members);
+using LeaveLobbyFn = void (*)(void* self, std::uint64_t lobby);
+CreateLobbyFn g_original_create_lobby = nullptr;
+LeaveLobbyFn g_original_leave_lobby = nullptr;
 
 void (*g_original_run_callbacks)() = nullptr;
 
@@ -74,7 +78,6 @@ struct Sink final : ISteamCallbackSink {
     void on_game_lobby_join_requested(const ps::GameLobbyJoinRequestedEvent& e) override {
         log_line("steam: GameLobbyJoinRequested lobby=%llu friend=%llu", (unsigned long long)e.lobby_id,
                  (unsigned long long)e.friend_id);
-        g_auto_host_done = true;  // the player chose to join: never auto-host over it
         if (g_session) guarded("GameLobbyJoinRequested", [&] {
             g_session->on_game_lobby_join_requested(e.lobby_id, e.friend_id);
         });
@@ -95,6 +98,51 @@ struct Sink final : ISteamCallbackSink {
 };
 Sink g_sink;
 
+std::uint64_t detour_create_lobby(void* self, int lobby_type, int max_members) {
+    int forwarded = lobby_type;
+    if (g_session) guarded("CreateLobby hook", [&] { forwarded = g_session->on_game_create_lobby(lobby_type); });
+    if (forwarded != lobby_type)
+        log_line("session: game CreateLobby(type %d, max %d) -> Seamless lobby (type %d)", lobby_type, max_members, forwarded);
+    return g_original_create_lobby(self, forwarded, max_members);
+}
+
+void detour_leave_lobby(void* self, std::uint64_t lobby) {
+    if (g_session) guarded("LeaveLobby hook", [&] { g_session->on_game_leave_lobby(lobby); });
+    g_original_leave_lobby(self, lobby);
+}
+
+void install_lobby_hooks() {
+    if (!g_lobby_hooks_enabled) {
+        log_line("session: lobby hooks disabled (nrsc_disable_hooks.txt); no Seamless lobby is created");
+        return;
+    }
+    void* mm = g_steam->matchmaking_object();
+    const auto vtable = mm ? *static_cast<std::uintptr_t*>(mm) : 0;
+    if (!vtable) {
+        log_line("session: ISteamMatchmaking object unavailable; lobby hooks not installed");
+        return;
+    }
+    try {
+        static hooks::Installer installer(platform::process_code_memory());  // VtableSlot only: no inline back end
+        hooks::HookSpec create;
+        create.name = "lobby ISteamMatchmaking::CreateLobby (slot 13)";
+        create.kind = hooks::Kind::VtableSlot;
+        create.site = vtable + 8 * kSlotCreateLobby;
+        create.detour = reinterpret_cast<void*>(&detour_create_lobby);
+        create.original = reinterpret_cast<void**>(&g_original_create_lobby);
+        hooks::HookSpec leave = create;
+        leave.name = "lobby ISteamMatchmaking::LeaveLobby (slot 15)";
+        leave.site = vtable + 8 * kSlotLeaveLobby;
+        leave.detour = reinterpret_cast<void*>(&detour_leave_lobby);
+        leave.original = reinterpret_cast<void**>(&g_original_leave_lobby);
+        installer.install(create);
+        installer.install(leave);
+        log_line("session: lobby hooks installed (vtable 0x%llx)", (unsigned long long)vtable);
+    } catch (const std::exception& e) {
+        log_line("session: lobby hooks failed: %s", e.what());
+    }
+}
+
 void start_session() {
     std::string err;
     g_steam = ps::SteamAdapter::create(g_sink, &err);
@@ -107,6 +155,12 @@ void start_session() {
     session::SteamInterfaces ifaces{g_steam->matchmaking(), g_steam->networking(), *g_steam, *g_steam};
     g_session = std::make_unique<session::Session>(ifaces, own);
     log_line("session: started, own SteamID %llu", (unsigned long long)own);
+    install_lobby_hooks();
+    // Text (devirt 2.9/2.11): the override's value for id 0x52409 is the member count; the second locale is the game's.
+    hooks::params::params_state().text_special_value = [] { return g_session ? g_session->member_count() : 0; };
+    const std::string lang = g_steam->GameLanguage();
+    hooks::params::set_game_language(lang);
+    log_line("session: game language \"%s\"", lang.c_str());
 }
 
 void detour_run_callbacks() {
@@ -121,12 +175,6 @@ void detour_run_callbacks() {
         if (g_last.QuadPart) dt = float(double(now.QuadPart - g_last.QuadPart) / double(g_freq.QuadPart));
         g_last = now;
         if (dt > 1.0f) dt = 1.0f;  // after a stall (loading screen) do not burst the limiters
-        g_uptime += dt;
-
-        if (g_auto_host_enabled && !g_auto_host_done && g_uptime >= kAutoHostDelaySeconds && !g_session->in_lobby()) {
-            g_auto_host_done = true;
-            log_line("session: auto-host (W): %s", g_session->host_start_session() ? "CreateLobby sent" : "skipped");
-        }
         g_session->tick(dt);
     } catch (const std::exception& e) {
         log_line("session: tick failed: %s", e.what());
@@ -135,10 +183,7 @@ void detour_run_callbacks() {
 
 }  // namespace
 
-void set_auto_host_enabled(bool enabled) {
-    g_auto_host_enabled = enabled;
-    if (!enabled) log_line("auto-host disabled (nrsc_disable_hooks.txt)");
-}
+void set_lobby_hooks_enabled(bool enabled) { g_lobby_hooks_enabled = enabled; }
 
 std::optional<hooks::HookSpec> session_driver_hook() {
     QueryPerformanceFrequency(&g_freq);

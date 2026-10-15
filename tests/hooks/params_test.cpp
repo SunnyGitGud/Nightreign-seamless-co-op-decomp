@@ -459,14 +459,33 @@ TEST(ParamsWire, RowSourceAndTargetsFromRepositoryGlobal) {
     slots.v[kSlotParamRepository] = addr(&repo_global);
     wire_from_slots(slots.reader(), {}, "/nonexistent");
     ASSERT_TRUE(static_cast<bool>(s.target_source));
-    EXPECT_EQ(s.target_source(), (std::vector<std::int32_t>{10, 20, 40}));  // slot -1 skipped
+    EXPECT_EQ(s.target_source(), scaling_target_ids());  // the recovered 80 ids, not the repository's rows
+    EXPECT_EQ(list_row_ids(reinterpret_cast<const std::byte*>(r.repo), 0x4f, 100), (std::vector<std::int32_t>{10, 20, 40}));  // slot -1 skipped
     EXPECT_EQ(s.row_source(0x4f, 10), reinterpret_cast<const std::byte*>(r.file + 0x180));
     EXPECT_EQ(s.row_source(0x4f, 40), reinterpret_cast<const std::byte*>(r.file + 0x1c0));
     EXPECT_EQ(s.row_source(0x4f, 30), nullptr);
     EXPECT_EQ(s.row_source(0x4f, 99), nullptr);
     repo_global = 0;  // repository not created yet: no rows, no fatal error
     EXPECT_EQ(s.row_source(0x4f, 10), nullptr);
-    EXPECT_TRUE(s.target_source().empty());
+}
+
+TEST(ParamsWire, ScalingTargetsAreTheEightyRecoveredIds) {
+    const auto ids = scaling_target_ids();
+    ASSERT_EQ(ids.size(), 80u);
+    EXPECT_EQ(ids.front(), 7700);
+    EXPECT_EQ(ids.back(), 7779);
+}
+
+TEST(ParamsWire, TextTablesAndCategory200Handler) {
+    ParamsState& s = fresh();
+    wire_from_slots(FakeSlots{}.reader(), {}, "/nonexistent");
+    ASSERT_EQ(s.text_handlers.size(), 1u);
+    EXPECT_EQ(s.text_handlers.begin()->first, 200u);
+    EXPECT_EQ(message_keys().size(), 8u);
+    EXPECT_EQ(fixed_texts().size(), 3u);
+    EXPECT_EQ(message_keys().front().id, 0x52409);
+    // No locale directory: the handler falls through to the original (null here).
+    EXPECT_EQ(s.text_handlers.at(200)(nullptr, 0, 200, 0x52409), nullptr);
 }
 
 TEST(ParamsWire, RegbndLoadedFillsTargetsOnceThenBuilds) {
