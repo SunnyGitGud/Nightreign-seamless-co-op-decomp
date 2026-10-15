@@ -128,6 +128,23 @@ Experiments (ported to the nrsc open items; run `--experiment <id>`):
 
 The ersc-only experiments (language override keys, battle-royale modes) were not ported: nrsc has no such settings.
 
+## 4b. Recording a live session (`record_session.py`)
+
+For the original nrsc.dll 1.1.3 only (it finds the hooks object through the thunk arena: closure `+0x08`). Same read-only policy.
+It polls, every 0.1 s, the master state `M` (`[H+0xe0]`: state flags with bit 3 / bit 5, member count `+0x190`, F4 pause `+0x195`),
+`R` (`[H+0xe8]`: flag-0x7f8 byte, boss list, rate state), `E` (`[H+0xa0]`: hook #25 / #23 vectors), the local PlayerGameData and 4
+member slots, CSSessionManager and the party member records, and logs every changed byte run.
+
+```sh
+python3 nrsc/tools/linux/record_session.py                 # start before or after the game; Ctrl-C or game exit ends it
+python3 nrsc/tools/linux/record_session.py mark "levelled up"   # timestamped note in the running record
+python3 nrsc/tools/linux/record_session.py --follow-log <dir>/nrsc_reconstruction.log   # also copy log lines
+```
+
+Output `evidence/runtime/<stamp>_session-record/`: `events.log` (readable, labelled, bit flips of `M+0`), `changes.jsonl`,
+`keyframes/`, `layout.json`, `summary.json`. Fields that change constantly are muted in `events.log` only. Not covered: event
+flag 0xa7f418 itself, and which code writes a value (that needs a debugger watchpoint).
+
 ## 5. Address tables (hooks joined with signatures)
 
 `load_joined_tables` reads `nrsc/evidence/signatures/signatures.json` and `nrsc/evidence/hooks/hooks.json` and joins them on the

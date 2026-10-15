@@ -52,8 +52,10 @@ public:
     // unset = empty/null chain = 0 members.
     void set_member_bytes_source(std::function<std::size_t()> f) { member_bytes_ = std::move(f); }
 
-    // Phase (6), W: the cross-thread job queue Z (moodycamel queue in the original, one pop per frame). post_job may be
-    // called from any thread; run_one_job pops and runs at most one job (call it WITHOUT holding the session mutex).
+    // Phase (6): the cross-thread job queue Z (moodycamel queue in the original, one pop per frame). In v1.1.3 the queue is
+    // never created ([C+0x90] stays null on every path, devirt 2.13), so the branch is dead in the original and nothing
+    // posts here either. post_job may be called from any thread; run_one_job pops and runs at most one job (call it
+    // WITHOUT holding the session mutex).
     void post_job(std::function<void()> job);
     bool run_one_job();
 

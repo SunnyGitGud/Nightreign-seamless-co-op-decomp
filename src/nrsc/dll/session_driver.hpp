@@ -10,12 +10,17 @@
 #include <optional>
 
 #include "nrsc/hooks/hook.hpp"
+#include "nrsc/signatures/signature_table.hpp"
 
 namespace nrsc::dll {
 
 // The HookSpec for SteamAPI_RunCallbacks (Kind::Inline); nullopt (logged) if steam_api64.dll or the export is missing,
 // in which case the game runs without co-op.
 std::optional<hooks::HookSpec> session_driver_hook();
+
+// Keeps the signature-table values the party data sync and the F4 pause use (slots 0x60, 0x68, 0xb8, 0x188, 0x190,
+// 0x198, 0x1b0; docs/devirt.md 2.12). Call before the session starts.
+void set_game_slots(const signatures::SignatureTable& table);
 
 // Diagnostic: when false, the ISteamMatchmaking CreateLobby/LeaveLobby hooks are not installed, so hosting in game makes
 // a vanilla lobby (set from the "no-auto-host" line of nrsc_disable_hooks.txt; the name is kept for existing files).

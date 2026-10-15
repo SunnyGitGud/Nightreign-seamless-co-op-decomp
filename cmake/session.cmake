@@ -7,5 +7,6 @@ foreach(_dep server hooks_net)
 endforeach()
 nrsc_add_module(
   SOURCES src/nrsc/session/join_flow.cpp src/nrsc/session/lobby_lifecycle.cpp src/nrsc/session/frame_task.cpp
+          src/nrsc/session/player_sync.cpp
           src/nrsc/session/party.cpp src/nrsc/session/session.cpp
   TESTS tests/session/session_test.cpp)

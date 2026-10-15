@@ -15,8 +15,9 @@ the project convention: C = confirmed, S = strong, W = weak, U = unknown.
 | 5 | **Roles not yet tested**: the rebuild as host, the rebuild on both sides, 3+ players. Only "rebuild = guest, original = host" was tried (it worked) | – | – | docs/plan_gaps.md "First two-player test" |
 | 6 | **#12 and P2 are MinHook inline hooks**, not the original's entry jumps. Prologue relocation is untested in game | – | `hooks/net/net_group.cpp` | docs/plan_gaps.md phase 2 |
 | 7 | **Solo expedition fails** ("Matchmaking failed"). The original fails the same way on the same install, so it is a limitation of the test install, not of the reconstruction | – | – | docs/plan_gaps.md |
-| 8 | Open session-side unknowns (W/U): default timer rates, job-queue payloads, `X+0x140`, the party bit-5 setter, the meaning of event flags `0xa7f418` / `0x7f8`, the boss list, the auto-control task objects | vanilla defaults documented per member | `session/`, `hooks/*/` state headers | docs/plan_gaps.md, docs/hooks.md §8 |
+| 8 | Open session-side unknowns (W/U): (job queue: never created in v1.1.3, devirt 2.13; timer rates = 1.0 and `X+0x140` = 0x…E0C0 are C, 2.12) the party bit-5 setter, the meaning of event flags `0xa7f418` / `0x7f8`, the boss list, the auto-control task objects | vanilla defaults documented per member | `session/`, `hooks/*/` state headers | docs/plan_gaps.md, docs/hooks.md §8 |
 | 9 | ~~Two of the 7 devirtualized functions do not return in emulation~~ **resolved 2026-10-16**: `0x180061140` returns every tick on the real state, `0x180040630` returns once its flag is cleared (no other code can clear it) | – | `devirt/tools/realimage3.py` | docs/devirt.md §2.10 |
+| 17 | Party data sync (sub-channels 3/4 per member per tick) and the F4 co-op pause, **recovered 2026-10-16** (devirt.md 2.12) and wired (`session/player_sync`). **Not yet tested in game**; field meanings U | – | `session/player_sync.cpp`, `dll/session_driver.cpp` | docs/devirt.md §2.12 |
 
 ## Build and repository
 

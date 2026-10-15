@@ -47,6 +47,14 @@ TEST(SessionWord, SoloIsZeroAndPartySetsBits0And5Everywhere) {
 
     hooks::set_party_session_active(false);
     EXPECT_EQ(net_word() & 0x21u, 0u);
+
+    hooks::set_session_word(0x05);  // host: lobby entered + created, no bit 5
+    EXPECT_EQ(hooks::world::state().mode_word.load() & 0x25u, 0x05u);
+    EXPECT_EQ(params_word() & 0x25u, 0x05u);
+    EXPECT_EQ(net_word() & 0x25u, 0x05u);
+    EXPECT_FALSE(hooks::params::params_state().alternate_set());  // (0x05 & 5) != 1, as in the original host
+    hooks::set_session_word(0);
+    EXPECT_EQ(net_word() & 0x25u, 0u);
 }
 
 }  // namespace

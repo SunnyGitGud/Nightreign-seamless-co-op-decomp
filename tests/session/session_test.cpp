@@ -85,14 +85,14 @@ server::ReceivedMessage control_packet(SteamId from, std::uint8_t bit) {
 struct Fixture : ::testing::Test {
     MockMM mm; MockNet net; MockLobbies lobbies; MockInfo info;
     hooks::net::NetState ns;
-    std::vector<bool> party_calls;
+    std::vector<std::uint32_t> party_calls;  // session words written (only on change)
     std::unique_ptr<Session> s;
     void SetUp() override {
         SessionConfig cfg;
         cfg.handshake_rate = 0.0f;  // keep the resend timer out of the way unless a test sets it
         cfg.ping_rate = 0.0f;
         s = std::make_unique<Session>(SteamInterfaces{mm, net, lobbies, info}, kMe, ns,
-                                      [this](bool a) { party_calls.push_back(a); }, cfg);
+                                      [this](std::uint32_t w) { party_calls.push_back(w); }, cfg);
     }
     // Join lobby kLobby (members: me, host, guest) through the full callback flow.
     void join_lobby() {
@@ -400,20 +400,20 @@ TEST_F(Fixture, StartupHandlersRegisteredAndPeerChannelFeedsNetState) {
 // ---- Session: party word ----
 TEST_F(Fixture, PartyWordSetOnHandshakeAndClearedOnLeave) {
     join_lobby();
-    EXPECT_TRUE(party_calls.empty());  // in lobby but nobody handshaken yet
+    EXPECT_EQ(party_calls, (std::vector<std::uint32_t>{0x01}));  // guest in lobby, nobody handshaken yet
     net.inbox = {control_packet(kHost, 0)};
     s->tick(0.016f);                    // poll -> queue -> handshake -> party
     EXPECT_TRUE(s->party_active());
-    EXPECT_EQ(party_calls, (std::vector<bool>{true}));
+    EXPECT_EQ(party_calls, (std::vector<std::uint32_t>{0x01, 0x21}));
     EXPECT_NE(s->flags() & kParty, 0u);
     EXPECT_EQ(s->peers().find_active(kHost)->flags & 0x31u, 0x31u);
     EXPECT_EQ(net.controls(), 1u);
     s->tick(0.016f);
-    EXPECT_EQ(party_calls.size(), 1u);  // only on change
+    EXPECT_EQ(party_calls.size(), 2u);  // only on change
 
     s->leave_session();
     EXPECT_FALSE(s->party_active());
-    EXPECT_EQ(party_calls, (std::vector<bool>{true, false}));
+    EXPECT_EQ(party_calls, (std::vector<std::uint32_t>{0x01, 0x21, 0}));
     EXPECT_EQ(s->flags() & kParty, 0u);
 }
 TEST_F(Fixture, PartyEndsWhenLastHandshakenPeerLeaves) {
@@ -423,7 +423,9 @@ TEST_F(Fixture, PartyEndsWhenLastHandshakenPeerLeaves) {
     ASSERT_TRUE(s->party_active());
     s->on_lobby_chat_update(kLobby, kHost, server::kChatDisconnected);
     EXPECT_FALSE(s->party_active());
-    EXPECT_EQ(party_calls, (std::vector<bool>{true, false}));
+    ASSERT_GE(party_calls.size(), 3u);
+    EXPECT_EQ(party_calls[1], 0x21u);
+    EXPECT_EQ(party_calls.back() & 0x20u, 0u);  // bit 5 gone with the last handshaken peer
     EXPECT_EQ(s->ping_ms(kHost), -1);
 }
 TEST_F(Fixture, TickIsInertWhileDetached) {
@@ -438,6 +440,21 @@ TEST_F(Fixture, JobsRunOutsideLockAndMayCallSession) {
     s->post_job([&] { ++n; (void)s->in_lobby(); });  // would deadlock if run under the mutex
     s->tick(0.0f);
     EXPECT_EQ(n, 1);
+}
+// Host side (live session record 2026-10-16): 0x05 from lobby entry, never bit 5, also with a handshaken guest.
+TEST_F(Fixture, HostWordIsLobbyEnteredAndCreatedWithoutBit5) {
+    ASSERT_TRUE(s->host_start_session());
+    s->on_lobby_created(kLobby);
+    mm.members = {kMe, kGuest}; mm.owner = kMe;
+    ASSERT_TRUE(s->on_lobby_enter(kLobby));
+    EXPECT_EQ(party_calls, (std::vector<std::uint32_t>{0x05}));
+    net.inbox = {control_packet(kGuest, 0)};
+    s->tick(0.016f);
+    EXPECT_TRUE(s->party_active());              // a handshaken peer exists
+    EXPECT_EQ(s->flags() & kParty, 0u);          // but no bit 5 on the host
+    EXPECT_EQ(party_calls, (std::vector<std::uint32_t>{0x05}));
+    s->leave_session();
+    EXPECT_EQ(party_calls, (std::vector<std::uint32_t>{0x05, 0}));
 }
 TEST(SessionWord, DefaultSetterDrivesTheRealPartyWord) {
     MockMM mm; MockNet net; MockLobbies lobbies; MockInfo info;
@@ -468,4 +485,166 @@ TEST_F(Fixture, ConcurrentTickAndPostJobAreSafe) {
     t.join();
     while (ran < 200) s->tick(0.0f);
     EXPECT_EQ(ran, 200);
+}
+
+// ---- party data sync + F4 pause (PlayerSync, docs/devirt.md 2.12). Expected bytes are the emulation's. ----
+namespace sync_test {
+
+struct FakeGame : IGamePlayers {
+    std::vector<std::byte> local = std::vector<std::byte>(0x900);
+    std::vector<std::byte> table = std::vector<std::byte>(4 * kRemotePlayerStride);
+    std::vector<PartyMember> party;
+    std::optional<std::uint32_t> state = 0u;
+    std::vector<std::pair<std::byte*, std::vector<std::byte>>> applied;
+    std::vector<bool> keys;
+    std::vector<std::u16string> shown;
+    bool world = true;
+    bool world_ready() override { return world; }
+    std::optional<std::uint32_t> session_state() override { return state; }
+    std::vector<PartyMember> members() override { return party; }
+    std::byte* local_player_data() override { return local.data(); }
+    std::byte* remote_player_table() override { return table.data(); }
+    void serialize(std::byte*, std::byte* out) override { for (std::size_t i = 0; i < kPlayerDataSize; ++i) out[i] = std::byte(i * 7 + 3); }
+    void deserialize(std::byte* pgd, const std::byte* in) override { applied.push_back({pgd, {in, in + kPlayerDataSize}}); }
+    bool f4_pressed() override {
+        if (keys.empty()) return false;
+        const bool k = keys.front();
+        keys.erase(keys.begin());
+        return k;
+    }
+    void show_message(const std::u16string& t) override { shown.push_back(t); }
+};
+
+template <class T>
+void put(std::vector<std::byte>& b, std::size_t off, T v) { std::memcpy(b.data() + off, &v, sizeof v); }
+
+}  // namespace sync_test
+
+TEST(PlayerSyncCodec, EncodeMatchesTheTaintRun) {
+    std::vector<std::byte> pgd(0x900);
+    using sync_test::put;
+    put<std::uint32_t>(pgd, 0x54, 0x11110011); put<std::uint32_t>(pgd, 0x68, 0x11110122); put<std::uint32_t>(pgd, 0xc8, 0x11110233);
+    put<std::uint32_t>(pgd, 0xcc, 0x11110344); put<std::uint32_t>(pgd, 0xe8, 0x11110455);
+    const std::pair<std::size_t, std::uint8_t> bytes[] = {{0xbe, 0xa1}, {0xc2, 0xa2}, {0xe5, 0xa3}, {0xe6, 0xa4}, {0x107, 0xa5},
+                                                         {0x187, 0xa6}, {0x86d, 0xa7}, {0x870, 0xa8}, {0x871, 0xa9}};
+    for (auto [o, v] : bytes) pgd[o] = std::byte(v);
+    const auto p = encode_player_state(pgd.data());
+    const std::uint8_t want[] = {0x55, 0x04, 0x11, 0x11, 0x22, 0x01, 0x11, 0x11, 0x33, 0x02, 0x11, 0x11, 0x44, 0x03,
+                                 0x11, 0x11, 0x11, 0x00, 0x11, 0x11, 0xa4, 0xa2, 0xa3, 0xa5, 0x02, 0xe7, 0xa6, 0xa9};
+    for (std::size_t i = 0; i < kPlayerStateSize; ++i) EXPECT_EQ(std::to_integer<int>(p[i]), want[i]) << i;
+}
+
+TEST(PlayerSyncCodec, DecodeMatchesTheInjectionRun) {
+    std::array<std::byte, kPlayerStateSize> payload{};
+    for (std::size_t i = 0; i < payload.size(); ++i) payload[i] = std::byte(0x30 + i);
+    std::vector<std::byte> pgd(0x900);
+    decode_player_state(payload, pgd.data());
+    auto u32 = [&](std::size_t o) { std::uint32_t v; std::memcpy(&v, pgd.data() + o, 4); return v; };
+    EXPECT_EQ(u32(0xe8), 0x33323130u);
+    EXPECT_EQ(u32(0x68), 0x37363534u);
+    EXPECT_EQ(u32(0xc8), 0x3b3a3938u);
+    EXPECT_EQ(u32(0xcc), 0x3f3e3d3cu);
+    EXPECT_EQ(u32(0x54), 0x43424140u);
+    EXPECT_EQ(u32(0x58), 0x43424140u);  // mirrored
+    EXPECT_EQ(std::to_integer<int>(pgd[0xe6]), 0x44);
+    EXPECT_EQ(std::to_integer<int>(pgd[0xc2]), 0x45);
+    EXPECT_EQ(std::to_integer<int>(pgd[0xe5]), 0x46);
+    EXPECT_EQ(std::to_integer<int>(pgd[0x107]), 0x47);
+    EXPECT_EQ(std::to_integer<int>(pgd[0x86d]), 1);  // 0x49: bit0
+    EXPECT_EQ(std::to_integer<int>(pgd[0xbe]), 0);   // bit1
+    EXPECT_EQ(std::to_integer<int>(pgd[0x870]), 0);  // bit2
+    EXPECT_EQ(std::to_integer<int>(pgd[0x187]), 0x4a);
+    EXPECT_EQ(std::to_integer<int>(pgd[0x871]), 0x4b);
+}
+
+TEST_F(Fixture, PlayerSyncSendsBothBlocksToEveryActiveMemberEachTick) {
+    sync_test::FakeGame g;
+    g.party = {{kHost, 1}, {kGuest, 2}, {999, 3}};  // 999 is no peer: nothing
+    join_lobby();
+    s->set_game_players(&g, nullptr);
+    net.sent.clear();
+    s->tick(0.016f);
+    std::map<std::pair<SteamId, int>, std::size_t> sizes;
+    for (auto& m : net.sent)
+        if (m.data.size() > 8 && m.data[0] == std::byte{3}) sizes[{m.to, std::to_integer<int>(m.data[1])}] = m.data.size();
+    EXPECT_EQ(sizes.size(), 4u);
+    EXPECT_EQ((sizes[{kHost, 3}]), 7 + kPlayerStateSize);
+    EXPECT_EQ((sizes[{kHost, 4}]), 7 + kPlayerDataSize);
+    EXPECT_EQ((sizes[{kGuest, 4}]), 7 + kPlayerDataSize);
+    // a null session manager does not block (C)
+    g.state = std::nullopt;
+    net.sent.clear();
+    s->tick(0.016f);
+    EXPECT_GE(net.sent.size(), 4u);
+    // no world object: nothing
+    g.state = 0;
+    g.world = false;
+    net.sent.clear();
+    s->tick(0.016f);
+    for (auto& m : net.sent) EXPECT_FALSE(m.data.size() > 8 && m.data[0] == std::byte{3} && m.data[1] != std::byte{1});
+    g.world = true;
+    // state >= 5: nothing is sent
+    g.state = 5;
+    net.sent.clear();
+    s->tick(0.016f);
+    for (auto& m : net.sent) EXPECT_FALSE(m.data.size() > 8 && m.data[0] == std::byte{3} && m.data[1] != std::byte{1});
+}
+
+TEST_F(Fixture, PlayerSyncAppliesReceivedBlocksToTheMembersSlot) {
+    sync_test::FakeGame g;
+    g.party = {{kHost, 1}};
+    sync_test::put<std::uint32_t>(g.table, kRemotePlayerStride + 0x8, 0xdead);
+    join_lobby();
+    s->set_game_players(&g, nullptr);
+    std::vector<std::byte> st(kPlayerStateSize, std::byte{0x11}), data(kPlayerDataSize, std::byte{0x22});
+    ns.enqueue_received(kHost, kPlayerStateChannel, st);
+    ns.enqueue_received(kHost, kPlayerDataChannel, data);
+    s->tick(0.016f);
+    std::byte* slot = g.table.data() + kRemotePlayerStride;  // slot index 1
+    std::uint32_t cleared;
+    std::memcpy(&cleared, slot + 0x8, 4);
+    EXPECT_EQ(cleared, 0u);
+    EXPECT_EQ(std::to_integer<int>(slot[0xe6]), 0x11);
+    ASSERT_EQ(g.applied.size(), 1u);
+    EXPECT_EQ(g.applied[0].first, slot);
+    EXPECT_EQ(s->player_sync().rx_flags(kHost), 12u);
+}
+
+TEST_F(Fixture, F4TogglesThePauseByteAndShowsTheMessage) {
+    sync_test::FakeGame g;
+    g.keys = {true, false, true};
+    join_lobby();
+    s->set_game_players(&g, [](std::int32_t c, std::int32_t id) -> std::optional<std::u16string> {
+        if (c != 15000) return std::nullopt;
+        return id == 2 ? std::u16string(u"Paused") : std::u16string(u"Resumed");
+    });
+    s->tick(0.016f);
+    EXPECT_TRUE(s->paused());
+    EXPECT_EQ(ns.state_blob[hooks::net::NetState::kStateForceFlag], 1);
+    s->tick(0.016f);
+    EXPECT_TRUE(s->paused());
+    s->tick(0.016f);
+    EXPECT_FALSE(s->paused());
+    EXPECT_EQ(ns.state_blob[hooks::net::NetState::kStateForceFlag], 0);
+    EXPECT_EQ(g.shown, (std::vector<std::u16string>{u"Paused", u"Resumed"}));
+}
+
+TEST_F(Fixture, PeerFlagBitsMaskTheTwoSends) {
+    sync_test::FakeGame g;
+    g.party = {{kHost, 1}};
+    join_lobby();
+    s->set_game_players(&g, nullptr);
+    auto count = [&](int ch) {
+        std::size_t n = 0;
+        for (auto& m : net.sent)
+            if (m.to == kHost && m.data.size() > 8 && m.data[0] == std::byte{3} && std::to_integer<int>(m.data[1]) == ch) ++n;
+        return n;
+    };
+    for (std::uint32_t f : {1u, 2u, 3u, 0xcu}) {
+        s->player_sync().set_peer_flags(kHost, f);
+        net.sent.clear();
+        s->tick(0.016f);
+        EXPECT_EQ(count(3), (f & 1) ? 0u : 1u) << f;
+        EXPECT_EQ(count(4), (f & 2) ? 0u : 1u) << f;
+    }
 }

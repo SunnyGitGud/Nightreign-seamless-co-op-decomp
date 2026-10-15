@@ -46,6 +46,7 @@ global, so the wiring dereferences them lazily (never at wire time).
 ## Still unresolved
 
 * What sets/clears W (0x21) and why (bit 5, M+0x190); the reconstructed session layer has to call `set_party_session_active`.
+  Live (2026-10-16 session records): bit 5 is set only on the **guest**, 1.4–2.4 s after lobby entry; a host stays 0x05 with 2 members. All bits clear together on leave.
 * The one int32 in hook #23's vector B (needs a dump of heap 0x889f8c0 or the startup VM 0x180040630).
 * Meaning of event flag 0xa7f418 and who sets it (the original reads it; it may be set by game data or by the VM startup code), and of flag 0x7f8.
 * Hook #14 reads `M+0x195` (0 live) – not a world-member, left to its current default.

@@ -409,6 +409,83 @@ Wired into the rebuild (2026-10-16): `session_driver` installs both slots as `Ki
 (`Session::on_game_create_lobby / on_game_leave_lobby`), the 20 s auto-host is gone; `params::wire` uses `scaling_target_ids()` and releases #7/#10;
 the text handler map, key table, fixed texts and the english-then-game-language order are wired (`params_group.cpp`). Not yet tested in game.
 
+### 2.12 Party data sync and the F4 pause in `0x180061140` (2026-10-16)
+
+Scenarios `s7_sync.py` .. `s10_gates.py` on the parked state of 2.10, with two new harness features: **taint** (distinct values planted in
+the fields the VM reads, then read back from the packet) and **injection** (at `recv_helper 0x180040370`'s return the harness writes a
+chosen message into its output buffer and sets the byte count). Grades: C for the emulation; names S/W.
+
+**Gates (C, `s10_gates`).** Both parts below need `[0x143c0f0a8]` (slot 0x188) and its `+0x174e8` pointer. The data sync also needs the local
+PlayerGameData `[[0x143c078d0]+8]`; F4 does not. CSSessionManager `+0x10 >= 5` stops the sync, a null manager does not. `0x143c13258` and
+`+0x9a50` gate nothing.
+
+**Per tick, for each party member** (records of `[0x143c21fc8]+0x30..+0x38`, 0xF0 bytes, SteamID `+0x10`, slot index `+0xe8`) **whose SteamID is
+an active peer** (others: nothing):
+
+1. *Resolve* (once): if `peer+0x28` is null, `slot = [[0x143c078d0]+0x10] + index * 0x8A0`, dwords `slot+0x8` and `slot+0x98` set to 0,
+   `peer+0x28 = slot`.
+2. *Receive* sub-channel 3 (28 bytes) into `slot` (the decoder below; `+0x54` is also stored at `+0x58`), `peer+0x38 |= 4`; then the 504-byte
+   buffer is zeroed and sub-channel 4 is received and applied with the game deserializer **`0x14020dcb0(slot, buf)`** (slot 0x68;
+   `+0x1d8 -> 0x1401f3c40`), `peer+0x38 |= 8`. Without a slot the original dereferences null (fault in `s_inject3`).
+3. *Send* sub-channel 3: 28 bytes from the local PlayerGameData; sub-channel 4: buffer zeroed, game serializer **`0x14020bde0(local, buf)`**
+   (slot 0x60; `+0x1d8 -> 0x1401f2400 -> +0x98 -> 0x1403815b0`: 6 x 0x48 entries, 6 + 10 dwords, a 6-bit mask, up to `+0x1f2`; it always
+   returns false and the original sends anyway), 504 bytes. Both with id 3, flags 9, Steam channel 26.
+
+Sub-channel 3 payload (taint `s_taint`, decoder `s_inject34_obj`, bits `tx_*` / `rx_*`):
+
+| payload | PlayerGameData | | payload | PlayerGameData |
+|---|---|---|---|---|
+| +0x00 u32 | +0xe8 | | +0x15 u8 | +0xc2 |
+| +0x04 u32 | +0x68 | | +0x16 u8 | +0xe5 |
+| +0x08 u32 | +0xc8 | | +0x17 u8 | +0x107 |
+| +0x0c u32 | +0xcc | | +0x18 u8 | constant 2 (ignored on receive) |
+| +0x10 u32 | +0x54 (receiver: also +0x58) | | +0x19 bits | bit0 +0x86d, bit1 +0xbe, bit2 +0x870 (send ORs the bytes shifted) |
+| +0x14 u8 | +0xe6 | | +0x1a / +0x1b u8 | +0x187 / +0x871 |
+
+**F4 (C).** `GetAsyncKeyState(VK_F4)` once per tick; only `0x8001` acts. It toggles **`M+0x195`**, the byte hook #14 (`0x180029990`) reads,
+so while paused the game's `GameDataMan+0xd8` getter reports true; then it calls **`0x14086a7a0(out16, const std::wstring*)`** (slot 0xb8)
+with the locale text, captured as `L"Paused"` (category 15000 id 2; id 3 `Resumed` on the second press). The function writes a 16-byte
+handle to `out16` (rcx) and returns it. The pause state is not sent to peers (sub-channel 3 is unchanged while paused).
+**Live (2026-10-16, `evidence/runtime/20261016-030701_session-record/`):** under Proton F4 never toggles `M+0x195` (guest or host), while the Windows peer's F4 works; W: the `0x0001` bit is not seen under Wine.
+
+**Also confirmed from the parked state.** The timer rates `X+0x14c` / `X+0x154` are **1.0** (session `SessionConfig` defaults were already 1.0, now C);
+`M+0x140` starts at `0xFFFFFFFFFFFFE0C0` (the join-error word with no error).
+
+Wired into the rebuild: `session/player_sync.{hpp,cpp}` (`PlayerSync`, `encode/decode_player_state`, `IGamePlayers`), ticked by
+`Session::tick` while attached; the Windows `IGamePlayers` is in `dll/session_driver.cpp` (slots 0x60, 0x68, 0xb8, 0x188, 0x190, 0x198, 0x1b0).
+Tests use the emulation's bytes. Not yet tested in game.
+
+Open (U): the meaning of the PlayerGameData fields of sub-channel 3. The 504-byte block, `peer+0x38` and the handle are answered in 2.13.
+
+### 2.13 The 504-byte block, `peer+0x38`, the job queue, the message handle (2026-10-16)
+
+**504-byte block (C for the layout, from the game's serializer `0x1403815b0`; S/W for names).** Source `E = PlayerGameData+0x1d8+0x98`
+(`+0x270`), an equipment record laid out like Elden Ring's ChrAsm (0x1c-byte header, item handles from `E+0x1c`, item ids from `E+0x9c`; S by
+analogy). The slot map `0x140381220` is the identity for 0..15.
+
+| block offset | content | source |
+|---|---|---|
+| +0x000 .. +0x1af | 6 x 0x48-byte item records, slots 0..5 (weapons, W) | `0x1406c16f0(rec, &E[0x1c + 4*slot])`: resolves the item handle (`0x1406a0d50`), `rec+0` item id; category = `(handle >> 28) & 7` (< 5); category 0 fills `+4`, three dwords `+8..+0x10`, bytes `+0x1c/+0x1d`, qword `+0x20`, bits `+0x1e`, byte `+0x1f`, dwords `+0x28/+0x2c/+0x3c/+0x40`; other categories fill `+8` / `+0x30` ranges |
+| +0x1b0 .. +0x1c4 | 6 dwords, slots 10..15 | `E[0x9c + 4*slot]` (item ids, W) |
+| +0x1c8 .. +0x1ec | 10 dwords | `E+0xdc .. E+0x100` |
+| +0x1f0 | u16, low 6 bits | bit `i` = byte `E[0x124 + i]`, i = 0..5 (per weapon slot, W) |
+
+The receiver applies it with the matching deserializer `0x14020dcb0 -> 0x1401f3c40` (into the member's PlayerGameData slot). Both are game code, so the
+rebuild calls them and never parses the block.
+
+**`peer+0x38` (C, `rx38_*` runs; no reader outside the VM: static scan of every readable function that touches peer flags `+0x128`).**
+bit0 = skip the sub-channel 3 send to this peer, bit1 = skip the sub-channel 4 send, bit2 = state received, bit3 = data block received. The VM
+rewrites the value unchanged on every send step; no writer of bits 0/1 was found in readable code or any emulated path (S).
+
+**Job queue (S: dead in v1.1.3).** Phase (6) of `0x180061140` pops `Z = [C+0x90]` (`C = ctx+0x30`). `Z` is null after startup and stays null
+through 20 ticks with send/receive/F4, the hooked CreateLobby and two LobbyDataUpdate callbacks (`s12_jobq`, write watch on `C+0x88..+0xa0`); no
+readable store reaches `C+0x90` (the `+0x90` stores near `+0x30` loads are the leaderboard call result and `ctx+0x90`). So nothing creates the
+queue and the branch never runs. The rebuild keeps the (empty) queue.
+
+**Message handle (S).** `0x14086a7a0` returns `{*result, id}` in the caller's 16 bytes (`[rbx] = r14`, `[rbx+8] = [rsp+0x28]`) without add-ref;
+the two ref-counted temporaries it creates are released inside (`0x14214eb90` atomic decrement, deleter on 1). It returns `{0, 0}` when the display
+singleton (`0x143c149d8`, slot 0x1b8) has `+0x14c` set or the `0x198` check fails. Nothing to release on the caller's side.
+
 ## 3. IAT ambiguity (`out/v2/iat_resolved.json`)
 
 Before: **62** slots with more than one candidate (`iat_names.json`). After: **56 resolved uniquely** (32 C, 24 S), **5 best guess W**, **1 unresolved U** => 6 still ambiguous. Method: scan all 927 `call/jmp [IAT]` sites

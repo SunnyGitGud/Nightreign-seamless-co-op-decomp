@@ -32,10 +32,13 @@ inline constexpr unsigned kChrManGlobal = 0x1d0;      // global 0x143c134f8; ctx
 inline constexpr std::uint32_t kExtendedPartyEventFlag = 0xa7f418;
 
 // The u64 word at the start of nrsc's master state (`*ctx[0xe0]` = `**ctx[0x58]` = the mode word `**(ctx[0x90]+0x10)`):
-// 0 while alone, 0x21 (bits 0 and 5) once a party exists, in every live capture (roundtable, matchmaking, expedition).
-// Who sets and clears it is protected code (session layer, phase 3), so the wiring leaves it 0 and offers this setter.
+// 0 while alone; a guest has 0x01 on lobby entry and 0x21 (bits 0 and 5) once the party is up; a host has 0x05 (bits 0 and 2:
+// lobby entered + created) and never bit 5 (C, live session records 2026-10-16). Who sets it is protected code (session
+// layer), so the wiring leaves it 0 and offers these setters. Only the bits of kSessionWordMask are written.
 inline constexpr std::uint32_t kPartySessionWord = 0x21;
-void set_party_session_active(bool active);
+inline constexpr std::uint32_t kSessionWordMask = 0x25;
+void set_session_word(std::uint32_t word);
+void set_party_session_active(bool active);  // = set_session_word(active ? 0x21 : 0)
 
 // The same task objects hook #6 registers, from a pointer to one of them: is_registered = `*(obj+0x10) != 0`
 // (0x180061050), do_register = `(*(obj+0x28))(obj, *(u32*)(obj+0x20))` (0x180061040). The objects are created by the

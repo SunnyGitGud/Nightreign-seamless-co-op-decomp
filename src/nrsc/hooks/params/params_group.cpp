@@ -301,7 +301,7 @@ void wire_from_slots(const std::function<std::uint64_t(unsigned)>& slot, const c
 
     // P3 + mode word: core object = settings block, byte +0x194 = 0 (default settings). The first dword is the party session
     // word: 0 while alone (solo captures) and 0x21 during a party (C, docs/wiring_world.md). It starts at 0 here and is set
-    // by hooks::set_party_session_active() (session layer), not at wiring time.
+    // by hooks::set_session_word() (session layer; a host has 0x05), not at wiring time.
     const std::uint32_t solo = 0;
     std::memcpy(const_cast<std::uint8_t*>(s.settings_block) + layout::kSettingsMode, &solo, sizeof solo);
 

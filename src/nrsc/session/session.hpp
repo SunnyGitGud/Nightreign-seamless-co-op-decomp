@@ -20,6 +20,7 @@
 #include "nrsc/server/message_bus.hpp"
 #include "nrsc/server/peer.hpp"
 #include "nrsc/session/frame_task.hpp"
+#include "nrsc/session/player_sync.hpp"
 #include "nrsc/session/join_flow.hpp"
 #include "nrsc/session/lobby_lifecycle.hpp"
 #include "nrsc/session/party.hpp"
@@ -46,7 +47,7 @@ class Session {
 public:
     // `own_id` = local SteamID (core+8). `net` must be the live NetState (construct after hooks::groups::net()).
     Session(SteamInterfaces steam, SteamId own_id, hooks::net::NetState& net = hooks::net::net_state(),
-            PartyTracker::Setter party_setter = hooks::set_party_session_active, SessionConfig cfg = {});
+            PartyTracker::Setter party_setter = hooks::set_session_word, SessionConfig cfg = {});
     ~Session();
     Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;
@@ -93,12 +94,16 @@ public:
     void set_broadcast_handler(server::MessageHandler h);    // message id 1 (U body)
     void post_job(std::function<void()> job);        // thread-safe
     void set_rates(float handshake_hz, float ping_hz);
+    // The game side of the party data sync and the F4 pause (devirt 2.12); null = off. `game` must outlive the Session.
+    void set_game_players(IGamePlayers* game, TextSource text);
+    bool paused() const;
 
     // Unlocked access for tests / adapter wiring only.
     SessionState& state() { return state_; }
     server::PeerList& peers() { return peers_; }
     server::MessageBus& bus() { return bus_; }
     FrameTask& frame_task() { return frame_; }
+    PlayerSync& player_sync() { return sync_; }
 
 private:
     void attach_locked();
@@ -114,6 +119,7 @@ private:
     LobbyLifecycle lifecycle_;
     server::Lobby lobby_;
     FrameTask frame_;
+    PlayerSync sync_;
     PartyTracker party_;
     server::MessageHandler sub_header_, broadcast_;
 };

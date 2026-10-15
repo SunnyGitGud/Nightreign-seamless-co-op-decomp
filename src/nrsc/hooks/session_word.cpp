@@ -9,11 +9,13 @@
 
 namespace nrsc::hooks {
 
-void set_party_session_active(bool active) {
-    world::set_party_session_active(active);
+void set_party_session_active(bool active) { set_session_word(active ? world::kPartySessionWord : 0); }
 
-    const auto apply = [active](std::uint32_t word) {
-        return active ? (word | world::kPartySessionWord) : (word & ~world::kPartySessionWord);
+void set_session_word(std::uint32_t value) {
+    world::set_session_word(value);
+
+    const auto apply = [value](std::uint32_t word) {
+        return (word & ~world::kSessionWordMask) | (value & world::kSessionWordMask);
     };
     auto update = [&](std::uint8_t* word_bytes) {
         std::uint32_t w;

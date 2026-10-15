@@ -137,6 +137,7 @@ void run_init() {
     const std::vector<std::string> disabled = read_disabled_hooks(dll_dir);
     install_hook_groups(installer, table, settings, dll_dir, disabled);
 
+    set_game_slots(table);
     set_lobby_hooks_enabled(std::find(disabled.begin(), disabled.end(), hooks::kNoAutoHostLine) == disabled.end());
     if (auto driver = session_driver_hook()) {  // session layer on the game thread (docs/session.md)
         installer.install(*driver);

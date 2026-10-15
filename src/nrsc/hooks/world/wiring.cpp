@@ -25,11 +25,13 @@ constexpr std::size_t kCondVtable = 0x00;
 
 }  // namespace
 
-void set_party_session_active(bool active) {
+void set_party_session_active(bool active) { set_session_word(active ? kPartySessionWord : 0); }
+
+void set_session_word(std::uint32_t value) {
     auto& s = state();
-    // Only bits 0 and 5 belong to the party state; bit 6 is the lobby flag mirrored by hook #22.
-    const auto apply = [active](std::uint64_t word) {
-        return active ? (word | kPartySessionWord) : (word & ~std::uint64_t{kPartySessionWord});
+    // Only bits 0, 2 and 5 belong to the session state; bit 6 is the lobby flag mirrored by hook #22.
+    const auto apply = [value](std::uint64_t word) {
+        return (word & ~std::uint64_t{kSessionWordMask}) | (value & kSessionWordMask);
     };
     s.mod_flags.store(static_cast<std::uint32_t>(apply(s.mod_flags.load())));
     s.mode_word.store(static_cast<std::uint32_t>(apply(s.mode_word.load())));

@@ -28,8 +28,10 @@ Session::Session(SteamInterfaces steam, SteamId own_id, hooks::net::NetState& ne
       lobby_(state_.core, peers_, steam.matchmaking,
              [this](SteamId id) {  // forwarded peer-left event; runs under the mutex (called from on_lobby_chat_update)
                  frame_.forget_peer(id);
+                 sync_.forget_peer(id);
              }),
       frame_(state_, peers_, bus_, net, steam.sessions),
+      sync_(peers_, bus_, net),
       party_(state_, peers_, std::move(party_setter)) {
     state_.core.own_id = own_id;
     state_.core.channel = cfg.receive_channel;
@@ -67,6 +69,7 @@ void Session::detach_locked(bool leave_steam) {
     }
     if (net_.bus == &bus_) net_.detach();
     for (std::size_t i = 0; i < peers_.size(); ++i) server::PeerList::reset(peers_.slot(i));
+    sync_.reset();
     frame_.clear_pings();
     state_.clear(kInLobby);
     state_.clear(kLobbyCreated);
@@ -134,6 +137,7 @@ void Session::tick(float dt) {
             bus_.poll();  // W: the original's caller of 0x180063110 is not recovered
             frame_.tick(dt);
             party_.update();
+            sync_.tick();  // devirt 2.12: party data sync + F4 pause
         }
     }
     frame_.run_one_job();
@@ -187,6 +191,11 @@ void Session::set_member_bytes_source(std::function<std::size_t()> f) {
 void Session::set_sub_header_handler(server::MessageHandler h) { std::lock_guard lk(mutex_); sub_header_ = std::move(h); }
 void Session::set_broadcast_handler(server::MessageHandler h) { std::lock_guard lk(mutex_); broadcast_ = std::move(h); }
 void Session::post_job(std::function<void()> job) { frame_.post_job(std::move(job)); }
+void Session::set_game_players(IGamePlayers* game, TextSource text) {
+    std::lock_guard lk(mutex_);
+    sync_.set_game(game, std::move(text));
+}
+bool Session::paused() const { std::lock_guard lk(mutex_); return sync_.paused(); }
 void Session::set_rates(float h, float p) {
     std::lock_guard lk(mutex_);
     frame_.timers().rate1 = h;
