@@ -16,7 +16,7 @@ the project convention: C = confirmed, S = strong, W = weak, U = unknown.
 | 6 | **#12 and P2 are MinHook inline hooks**, not the original's entry jumps. Prologue relocation is untested in game | – | `hooks/net/net_group.cpp` | docs/plan_gaps.md phase 2 |
 | 7 | **Solo expedition fails** ("Matchmaking failed"). The original fails the same way on the same install, so it is a limitation of the test install, not of the reconstruction | – | – | docs/plan_gaps.md |
 | 8 | Open session-side unknowns (W/U): default timer rates, job-queue payloads, `X+0x140`, the party bit-5 setter, the meaning of event flags `0xa7f418` / `0x7f8`, the boss list, the auto-control task objects | vanilla defaults documented per member | `session/`, `hooks/*/` state headers | docs/plan_gaps.md, docs/hooks.md §8 |
-| 9 | Two of the 7 devirtualized functions do not return in emulation | – | `devirt/` | docs/devirt.md §5 |
+| 9 | ~~Two of the 7 devirtualized functions do not return in emulation~~ **resolved 2026-10-16**: `0x180061140` returns every tick on the real state, `0x180040630` returns once its flag is cleared (no other code can clear it) | – | `devirt/tools/realimage3.py` | docs/devirt.md §2.10 |
 
 ## Build and repository
 

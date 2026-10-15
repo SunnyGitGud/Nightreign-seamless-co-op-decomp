@@ -44,9 +44,9 @@ Harness facts learned (**C**): the PE entry `0x1801b4043` is Themida's stub; the
 | `0x18008e110` | 74 | yes | `curl_easy_perform(CURL*)` | C | libcurl 7.76.1 |
 | `0x180033210` | 46 | yes | CURLOPT_WRITEFUNCTION callback into a 0x30e8-byte buffer | C (behaviour), S (intent) | mod, server_manager / update check |
 | `0x180064120` | 605 | yes (3-4 events) | tiny key-match accessor in a closure vtable | C (behaviour), W (class) | mod (hooks closures / std::function-like) |
-| `0x180061140` | 8025 | yes with a concrete graph | per-tick timer/queue update of a server_manager task | S (structure), W (purpose) | server_manager |
+| `0x180061140` | 8025 | **yes, on the real startup state, every tick of every scenario** (2.10) | FD4 task run slot: party net sync (data send to members, 1 s heartbeat, F4 pause toggle) | C (behaviour in emulation), S (purpose) | server_manager |
 | `0x1800221e0` | 13742 | yes (v1 and v2 symbolic) | installer of 17 more hooks (call-site, jmp, MinHook) | C | hooks.cpp |
-| `0x180040630` | 28443 | **no, by design** (see 2.7) | mod main-thread routine | S | mod init |
+| `0x180040630` | 28443 | **yes once its running flag is cleared** (2.9, 2.10); never on its own: only the thread itself holds the flag | mod main-thread routine | C (emulation) | mod init |
 
 ### 2.1 `0x18008e050` = `curl_easy_init` (C)
 
@@ -344,6 +344,32 @@ folded into something the struct does not expose, e.g. a hash used by a hook) is
 - The 462 game-image writes, the three curl bodies (still no response modelled), the Warning box text on a missing language file, `ISteamUtils` slot 15 (called twice, args not shown), the meaning of owner fields `+0x30/+0x48/+0x70/+0x98`, of task fields `+0x20 = 0x98` / `+0x28 = game+0xfebc80`, and the secret's final consumer.
 - Whether the real `GetModuleFileNameA(hModule)` / `GetFileAttributesEx` fidelity (UTF-8 vs ANSI path conversion `0x1800906a0`, stubbed to 1 = UTF-8) matters for non-ASCII install paths.
 
+### 2.10 Task run slot `0x180061140` on the real state; stop flag of `0x180040630` (2026-10-16)
+
+Tool `tools/realimage3.py` (imports `realimage2.py`, not edited), scenarios `scenarios/s5*.py`, results `out/v5/<scenario>.json` + `.events.jsonl`, `startup_blkrefs.json`.
+Startup `0x180040630` runs as in 2.9 until its 3rd `Sleep(50)` (about 85 s), the registers are saved, and the process `fork()`s one child per scenario (copy-on-write, so every scenario starts from the same image).
+A child plants values into the live objects, calls `vtable 0x180147b40 [+0x10]` = `0x180061140(task, data)` on a **second stack** (the main thread's frame holds core/owner/callbacks), `data+8` = float dt (1/30), N ticks, logging every read/write the VM does outside `.themida`, every exit, API, Steam call and packet. Game code is never executed: a fetch into `nightreign.exe` is logged (`game_call`) and returns 0.
+Fix over realimage.py: Unicorn ignores a PC change made inside the fetch hook, so the driver stops and performs the return itself (the earlier "call to 0" fault in `k_press` was this).
+
+**Scheduling (C).** Task slot `+0x18` = `0x180061040` = `jmp [this+0x28]` with `edx = [this+0x20]` (wiring_world.md); `+0x28` = `0x140febc80` (game `.text`, compares the group against `0x9b`), `+0x20` = `0x98`. The four tasks are registered with the game's task system in group `0x98`; `data` matches FD4TaskData (delta time at `+8`, S). This answers "what schedules the tasks".
+
+**Result: `0x180061140` returns on every tick in all 31 scenarios** (rounds base, b-g; 30-120 ticks each). Branch conditions found (C for the emulation, S for names):
+
+| Input (live object) | Effect |
+|---|---|
+| game globals `0x143c0f0a8` (slot 0x188), `0x143c21ec8` CSSessionManager (0x190), `0x143c21fc8` member owner (0x198), `0x143c078d0` GameDataMan (0x1b0), `0x143c13258` (0x1c8) | all null (as in the menu): only the timers run, nothing is sent |
+| peer `+0x128` flag (bit 0 active) and peer `+0x8` SteamID, for the 5 pool peers | `recv_helper 0x180040370(peers.begin, peers.end, steamid, 1)` per active peer (a peer lookup, S) |
+| timer `X+0x148 += dt`, reset at `>= 1.0f` (`0x180145d70`) | once per second: `send_control 0x18003f2c0` to every active peer = packet `03 01 00 01 00 00 00 b` (8 bytes, flags 9, Steam channel 26). `b` stayed 0 in all runs, also while paused (so it is not the F4 byte; source U) |
+| `GetAsyncKeyState(0x73)` = **VK_F4**, polled once per tick (IAT `0x1801612b0`, which resolves the candidates `{EnumThreadWindows, GetAsyncKeyState, GetKeyboardState, GetSystemMetrics}` to **GetAsyncKeyState**, S: one int argument 0x73 is no valid SM_ index) | only the value `0x8001` (pressed + pressed-since-last-call) acts, `0x8000` (held) and `0x0001` do not: toggles a pause byte in the core frame (`0x7ff0001ef025`, 0->1, then 1->0) and calls the game function `0x14086a7a0` (signature slot 0xb8; uses the FD4Singleton at `0x143c149d8`, slot 0x1b8) with the locale repository `+0xb0` as 4th argument and a sequence value 1, 2 in it: the PAUSED/RESUMED on-screen message (S; text id not captured, the game code is not run) |
+| CSSessionManager `+0x10` (dword) | `< 5`: data path runs (5 or 9 receive lookups per tick); `>= 5`: 2 lookups, no data send |
+| member owner `+0x30/+0x38` = vector of 0xf0-byte entries, entry `+0x10` | **must hold a peer SteamID** (as a pointer nothing happens). Then `send_data 0x18003f030(core, steamid, buf, len)` every tick, twice per member: id 3 sub-channel **3**, 28-byte payload (packet `03 03 00 1c 00 00 00 ...`, 35 bytes) and id 3 sub-channel **4**, 504-byte payload (`03 04 00 f8 01 00 00 ...`, 511 bytes), flags 9, Steam channel 26, identity type 16 (SteamID). Payload built with the game function `0x14020bde0` (slot 0x60, called twice per tick, returns 0 here, so the payload is zeros except a dword 2 at payload +0x18 in sub-channel 3) |
+| `WGame+0x9a50` dword != 0 with `+0x9a58` object (and `+0x9a58 -> +0x10`) | read and followed; no further boundary crossing seen (U) |
+| `GameDataMan+0x8`, member `+0x100` (2nd entry +0x10) | read (pointers / SteamID) |
+
+**Stop flag of `0x180040630` (C).** The wrapper `0x1800405c0` stores the constant 1 at its own `[rsp+0x20]` (`0x1800405df`) and passes only that address. At the park point the block address exists only in the thread's frame (`0x7ff0001ee590`, `0x7ff0001efd68`), in the VM context inside `.themida` and in `rdi`, nowhere in the heap or `.data` (`out/v5/startup_blkrefs.json`). So no other code can clear it: the routine is the lifetime of the mod thread and ends with the process. Forced (`resume_main`), it returns cleanly also after 35 ticks of full send/receive activity (`g_paused_hb`, `g_full_s4`, `base_resume`).
+
+**Still open (U).** The meaning of the two data payloads (they come from game code that is not executed: sub-channel 3 = 28 B, sub-channel 4 = 504 B), the source of the heartbeat byte `b`, the exact text the F4 path shows, the `WGame+0x9a50` branch's purpose.
+
 ## 3. IAT ambiguity (`out/v2/iat_resolved.json`)
 
 Before: **62** slots with more than one candidate (`iat_names.json`). After: **56 resolved uniquely** (32 C, 24 S), **5 best guess W**, **1 unresolved U** => 6 still ambiguous. Method: scan all 927 `call/jmp [IAT]` sites
@@ -358,8 +384,8 @@ Best guesses: `0x180160560` CreateEventW, `0x180160700` GetFullPathNameW, `0x180
 
 ## 5. Open unknowns
 
-- Real-game run of `0x180040630` (map `nightreign.exe` as data; needs signature hits) and whether it ever returns.
-- Conditions that make `0x180061140` call `0x18003f030` / `0x180040370`; meaning of timers `+0x148..+0x190` and the 2/3 threshold.
+- ~~Real-game run of `0x180040630` and whether it ever returns~~: 2.8-2.10 (returns only when its flag is forced; nothing else can clear it).
+- ~~Conditions that make `0x180061140` call `0x18003f030` / `0x180040370`~~: resolved in 2.10. Still U: payload meaning, heartbeat byte source.
 - The URL and use of the curl fetch in `0x180040630`; whether the "Update required" check is version-based.
 - Class owning vtable `0x180147898` (`0x180064120`).
 - `--init` (DllMain CRT) still ends at rip 1; not needed so far.
